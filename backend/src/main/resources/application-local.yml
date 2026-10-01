@@ -1,0 +1,20 @@
+spring:
+  datasource:
+    url: jdbc:h2:file:./data/warrantyvault;MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password: sa
+  flyway:
+    locations: classpath:db/migration
+  jpa:
+    show-sql: false
+app:
+  storage:
+    local-dir: ./uploads
+  reminders:
+    internal-scheduler-enabled: true
+server:
+  servlet:
+    session:
+      cookie:
+        same-site: Lax
+        secure: false

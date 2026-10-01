@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -e
+DIR="$(cd "$(dirname "$0")" && pwd)"
+JAVA_HOME="${JAVA_HOME:-/usr/lib/jvm/java-21-openjdk}"
+export JAVA_HOME
+export PATH="$JAVA_HOME/bin:$PATH"
+exec java -Dmaven.multiModuleProjectDirectory="$DIR" -classpath "$DIR/.mvn/wrapper/maven-wrapper.jar" org.apache.maven.wrapper.MavenWrapperMain "$@"

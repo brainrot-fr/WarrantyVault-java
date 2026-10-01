@@ -1,0 +1,11 @@
+.env*
+!.env.example
+**/node_modules/
+**/target/
+**/dist/
+uploads/
+data/
+backend/data/
+backend/uploads/
+backend/local.log
+.DS_Store
