@@ -1,0 +1,22 @@
+spring:
+  datasource:
+    url: ${DB_URL:}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${DB_USER:}
+    password: ${DB_PASSWORD:}
+  flyway:
+    locations: classpath:db/migration
+  jpa:
+    show-sql: false
+app:
+  storage:
+    local-dir: ./uploads
+  reminders:
+    internal-scheduler-enabled: false
+server:
+  servlet:
+    session:
+      cookie:
+        secure: true
+        same-site: ${COOKIE_SAMESITE:Lax}
+        domain: ${COOKIE_DOMAIN:}

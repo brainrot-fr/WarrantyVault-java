@@ -1,0 +1,65 @@
+@import '@fontsource-variable/playfair-display';
+@import '@fontsource-variable/dm-sans';
+@import 'tailwindcss';
+@import './tokens.css';
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-canvas-hover: var(--canvas-hover);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-hairline: var(--hairline);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-status-active: var(--status-active);
+  --color-status-soon: var(--status-soon);
+  --color-status-expired: var(--status-expired);
+  --color-raised: var(--raised);
+  --font-editorial: var(--font-display);
+  --font-text: var(--font-body);
+  --spacing: 4px;
+  --radius-sm: var(--radius-control);
+  --radius-md: var(--radius-sheet);
+  --radius-none: 0px;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-body);
+  line-height: 1.55;
+  font-size: var(--text-base);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button, input, textarea, select {
+  border-radius: var(--radius-control);
+}
+
+input, select, textarea { font-size: 16px; }
+
+button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+p { margin: 0; }
+
+* { box-sizing: border-box; }
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+}
