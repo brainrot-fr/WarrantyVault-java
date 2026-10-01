@@ -51,7 +51,11 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.GET, "/api/health", "/api/meta/config").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/refresh", "/api/auth/logout").permitAll()
-                .requestMatchers("/api/internal/**").permitAll()
+                .requestMatchers(HttpMethod.GET, "/", "/index.html", "/assets/**", "/icons/**", "/tesseract/**",
+                    "/manifest.webmanifest", "/sw.js", "/registerSW.js", "/favicon.ico", "/favicon.svg",
+                    "/icons.svg", "/*.js", "/*.css",
+                    "/login", "/register", "/dashboard", "/spaces", "/spaces/*", "/spaces/*/products/**",
+                    "/spaces/*/members", "/invitations", "/settings", "/not-found").permitAll()
                 .anyRequest().authenticated())
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(new RateLimitFilter(environment), JwtAuthenticationFilter.class)

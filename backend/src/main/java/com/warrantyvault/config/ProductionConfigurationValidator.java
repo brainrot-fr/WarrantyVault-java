@@ -17,9 +17,7 @@ public class ProductionConfigurationValidator {
     @Bean
     static BeanFactoryPostProcessor validateProductionConfiguration(ConfigurableEnvironment environment) {
         List<String> required = List.of(
-            "DB_URL", "DB_USER", "DB_PASSWORD", "JWT_SECRET", "CORS_ALLOWED_ORIGINS",
-            "CRON_SECRET", "APP_BASE_URL", "CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY",
-            "CLOUDINARY_API_SECRET", "BREVO_API_KEY", "BREVO_SENDER"
+            "DB_URL", "DB_USER", "DB_PASSWORD", "JWT_SECRET", "CORS_ALLOWED_ORIGINS"
         );
         List<String> absent = required.stream()
             .filter(name -> environment.getProperty(name) == null || environment.getProperty(name).isBlank())

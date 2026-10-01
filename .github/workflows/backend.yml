@@ -4,10 +4,16 @@ on:
   push:
     paths:
       - "backend/**"
+      - "frontend/**"
+      - "railway.toml"
+      - ".dockerignore"
       - ".github/workflows/backend.yml"
   pull_request:
     paths:
       - "backend/**"
+      - "frontend/**"
+      - "railway.toml"
+      - ".dockerignore"
       - ".github/workflows/backend.yml"
 
 jobs:

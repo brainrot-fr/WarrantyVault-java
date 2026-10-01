@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { invalidateAfterPreferenceChange, invalidateAfterProductChange } from './queryInvalidation.js';
+import { invalidateAfterProfileChange, invalidateAfterProductChange } from './queryInvalidation.js';
 
 describe('user-scoped query invalidation', () => {
   it('invalidates only the changed user and product space data', () => {
@@ -17,13 +17,12 @@ describe('user-scoped query invalidation', () => {
     ]);
   });
 
-  it('invalidates user-scoped data when preferences change', () => {
+  it('invalidates user-scoped data when profile settings change', () => {
     const queryClient = { invalidateQueries: vi.fn() };
 
-    invalidateAfterPreferenceChange(queryClient, 'user-1');
+    invalidateAfterProfileChange(queryClient, 'user-1');
 
     expect(queryClient.invalidateQueries.mock.calls.map(([query]) => query.queryKey)).toEqual([
-      ['notification-preferences', 'user-1'],
       ['dashboard', 'user-1'],
       ['spaces', 'user-1'],
       ['space', 'user-1'],

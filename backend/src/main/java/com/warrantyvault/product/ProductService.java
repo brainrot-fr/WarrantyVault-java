@@ -15,7 +15,6 @@ import com.warrantyvault.storage.StorageService;
 import com.warrantyvault.config.AppProperties;
 import com.warrantyvault.user.User;
 import com.warrantyvault.user.UserRepository;
-import com.warrantyvault.user.NotificationPreferenceRepository;
 import java.math.BigDecimal;
 import java.io.IOException;
 import java.time.Clock;
@@ -45,11 +44,10 @@ public class ProductService {
     private final StorageService storageService;
     private final AppProperties appProperties;
     private final Clock clock;
-    private final NotificationPreferenceRepository preferenceRepository;
 
     public ProductService(ProductRepository productRepository, SpaceRepository spaceRepository, UserRepository userRepository,
                           SpaceMemberRepository spaceMemberRepository, StorageService storageService,
-                          AppProperties appProperties, Clock clock, NotificationPreferenceRepository preferenceRepository) {
+                          AppProperties appProperties, Clock clock) {
         this.productRepository = productRepository;
         this.spaceRepository = spaceRepository;
         this.userRepository = userRepository;
@@ -57,7 +55,6 @@ public class ProductService {
         this.storageService = storageService;
         this.appProperties = appProperties;
         this.clock = clock;
-        this.preferenceRepository = preferenceRepository;
     }
 
     @Transactional(readOnly = true)
@@ -173,9 +170,8 @@ public class ProductService {
     public ProductResponse productResponse(Product product, String userId) {
         SpaceMember membership = requireMembership(product.getSpace().getId(), userId);
         User user = membership.getUser();
-        int daysBefore = preferenceRepository.findById(userId).map(pref -> pref.getDaysBefore()).orElse(30);
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(user.getTimezone())));
-        return ProductResponse.from(product, membership.getRole(), today, daysBefore);
+        return ProductResponse.from(product, membership.getRole(), today);
     }
 
     @Transactional(readOnly = true)
@@ -190,10 +186,9 @@ public class ProductService {
         }
         SpaceMember membership = requireMembership(spaceId, userId);
         User user = membership.getUser();
-        int daysBefore = preferenceRepository.findById(userId).map(pref -> pref.getDaysBefore()).orElse(30);
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(user.getTimezone())));
         List<ProductResponse> items = productRepository.findBySpaceIdWithResponseDetails(spaceId).stream()
-            .map(product -> ProductResponse.from(product, membership.getRole(), today, daysBefore))
+            .map(product -> ProductResponse.from(product, membership.getRole(), today))
             .filter(product -> status == null || status.equals(product.status()))
             .filter(product -> type == null || type.isBlank() || product.productType().equalsIgnoreCase(type))
             .filter(product -> query == null || query.isBlank() || (

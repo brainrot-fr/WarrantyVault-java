@@ -19,7 +19,9 @@ export function apiBaseUrl() {
 }
 
 export function getApiConfigurationError() {
-  return baseUrl ? '' : 'Set VITE_API_BASE_URL to your WarrantyVault API URL and rebuild the application.';
+  return !baseUrl && import.meta.env.DEV
+    ? 'Set VITE_API_BASE_URL to your WarrantyVault API URL and rebuild the application.'
+    : '';
 }
 
 export function setAccessToken(token) {
@@ -99,7 +101,8 @@ async function readProblem(response) {
 }
 
 export async function apiRequest(path, options = {}) {
-  if (!baseUrl) throw new Error(getApiConfigurationError());
+  const configurationError = getApiConfigurationError();
+  if (configurationError) throw new Error(configurationError);
   const {
     skipRefresh = false,
     ...requestOptions
@@ -159,6 +162,7 @@ export async function apiJson(path, options = {}) {
 }
 
 export async function refreshSession() {
-  if (!baseUrl) throw new Error(getApiConfigurationError());
+  const configurationError = getApiConfigurationError();
+  if (configurationError) throw new Error(configurationError);
   return refreshAccessToken();
 }

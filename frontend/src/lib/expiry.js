@@ -26,12 +26,9 @@ export function computeExpiresOn(purchasedOn, warrantyMonths) {
   return date;
 }
 
-export function computeStatus(expiresOn, today, daysBefore) {
-  if (!Number.isInteger(daysBefore) || daysBefore < 1 || daysBefore > 120) {
-    throw new RangeError('Reminder threshold must be between 1 and 120 days');
-  }
+export function computeStatus(expiresOn, today) {
   const diff = Math.floor((parseDate(expiresOn) - parseDate(today)) / 86_400_000);
   if (diff < 0) return 'EXPIRED';
-  if (diff <= daysBefore) return 'EXPIRING_SOON';
+  if (diff <= 30) return 'EXPIRING_SOON';
   return 'ACTIVE';
 }

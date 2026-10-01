@@ -39,10 +39,6 @@ export const profileSchema = z.object({
   currency: z.string().regex(/^[A-Z]{3}$/, 'Choose a currency.')
 });
 
-export const customReminderSchema = z.object({
-  daysBefore: z.coerce.number().int('Enter a whole number of days.').min(1, 'Use at least 1 day.').max(120, 'Use no more than 120 days.')
-});
-
 export const changePasswordSchema = z.object({
   currentPassword: z.string().min(1, 'Enter your current password.'),
   newPassword: passwordSchema,

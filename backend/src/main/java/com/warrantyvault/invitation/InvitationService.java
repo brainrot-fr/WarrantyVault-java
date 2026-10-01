@@ -2,8 +2,6 @@ package com.warrantyvault.invitation;
 
 import com.warrantyvault.common.ApiException;
 import com.warrantyvault.common.UuidGenerator;
-import com.warrantyvault.config.AppProperties;
-import com.warrantyvault.mail.MailService;
 import com.warrantyvault.member.SpaceMember;
 import com.warrantyvault.member.SpaceMemberRepository;
 import com.warrantyvault.security.CurrentUser;
@@ -17,35 +15,26 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.transaction.support.TransactionSynchronization;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class InvitationService {
-    private static final Logger logger = LoggerFactory.getLogger(InvitationService.class);
     private final InvitationRepository invitationRepository;
     private final SpaceMemberRepository spaceMemberRepository;
     private final SpaceRepository spaceRepository;
     private final UserRepository userRepository;
     private final CurrentUser currentUser;
-    private final MailService mailService;
-    private final AppProperties appProperties;
     private final Clock clock;
 
     public InvitationService(InvitationRepository invitationRepository, SpaceMemberRepository spaceMemberRepository,
                              SpaceRepository spaceRepository, UserRepository userRepository, CurrentUser currentUser,
-                             MailService mailService, AppProperties appProperties, Clock clock) {
+                             Clock clock) {
         this.invitationRepository = invitationRepository;
         this.spaceMemberRepository = spaceMemberRepository;
         this.spaceRepository = spaceRepository;
         this.userRepository = userRepository;
         this.currentUser = currentUser;
-        this.mailService = mailService;
-        this.appProperties = appProperties;
         this.clock = clock;
     }
 
@@ -76,30 +65,7 @@ public class InvitationService {
         invitation.setCreatedAt(now);
         invitation.setExpiresAt(now.plusSeconds(14L * 24 * 60 * 60));
         Invitation saved = invitationRepository.save(invitation);
-        InvitationView response = InvitationView.forDelivery(saved);
-        String url = appProperties.getAppBaseUrl() + "/invitations";
-        String roleText = role == SpaceRole.EDITOR ? "an editor" : "a viewer";
-        String subject = inviter.getName() + " invited you to " + space.getName() + " on WarrantyVault";
-        String plain = inviter.getName() + " invited you to join " + space.getName() + " as " + roleText
-            + ". View and respond to the invitation at " + url;
-        String html = "<div style=\"font:16px/1.6 Arial,sans-serif;color:#263238;max-width:560px;margin:auto\">"
-            + "<h1 style=\"font-family:Georgia,serif;font-weight:400\">You’re invited</h1><p>"
-            + escape(inviter.getName()) + " invited you to <strong>" + escape(space.getName())
-            + "</strong> as " + roleText + ".</p><p><a href=\"" + escape(url)
-            + "\" style=\"display:inline-block;background:#516b58;color:#fff;padding:12px 18px;text-decoration:none;border-radius:8px\">View invitation</a></p></div>";
-        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-                try {
-                    mailService.send(normalizedEmail, subject, plain, html);
-                    response.setEmailSent(true);
-                } catch (RuntimeException exception) {
-                    logger.warn("Invitation email delivery failed for invitation {}: {}",
-                        saved.getId(), exception.getClass().getSimpleName());
-                }
-            }
-        });
-        return response;
+        return InvitationView.from(saved);
     }
 
     @Transactional(readOnly = true)
@@ -225,11 +191,6 @@ public class InvitationService {
 
     private ApiException notFound() { return new ApiException("NOT_FOUND", "Resource not found", 404); }
 
-    private String escape(String value) {
-        return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-            .replace("\"", "&quot;").replace("'", "&#39;");
-    }
-
     public record MemberListing(List<MemberView> members, List<InvitationView> invitations) {}
     public record MemberView(String userId, String name, String email, SpaceRole role, Instant addedAt) {
         static MemberView from(SpaceMember member) {
@@ -243,27 +204,20 @@ public class InvitationService {
         private final String status;
         private final Instant createdAt;
         private final Instant expiresAt;
-        private boolean emailSent;
 
         private InvitationView(String id, String email, SpaceRole role, String status, Instant createdAt,
-                               Instant expiresAt, boolean emailSent) {
+                               Instant expiresAt) {
             this.id = id;
             this.email = email;
             this.role = role;
             this.status = status;
             this.createdAt = createdAt;
             this.expiresAt = expiresAt;
-            this.emailSent = emailSent;
         }
 
         static InvitationView from(Invitation invitation) {
             return new InvitationView(invitation.getId(), invitation.getInvitedEmail(), invitation.getRole(),
-                invitation.getStatus(), invitation.getCreatedAt(), invitation.getExpiresAt(), true);
-        }
-
-        static InvitationView forDelivery(Invitation invitation) {
-            return new InvitationView(invitation.getId(), invitation.getInvitedEmail(), invitation.getRole(),
-                invitation.getStatus(), invitation.getCreatedAt(), invitation.getExpiresAt(), false);
+                invitation.getStatus(), invitation.getCreatedAt(), invitation.getExpiresAt());
         }
 
         public String getId() { return id; }
@@ -272,8 +226,6 @@ public class InvitationService {
         public String getStatus() { return status; }
         public Instant getCreatedAt() { return createdAt; }
         public Instant getExpiresAt() { return expiresAt; }
-        public boolean isEmailSent() { return emailSent; }
-        void setEmailSent(boolean emailSent) { this.emailSent = emailSent; }
     }
     public record InviteForUser(String id, String spaceName, String invitedByName, SpaceRole role, Instant createdAt, Instant expiresAt) {
         static InviteForUser from(Invitation invitation) {

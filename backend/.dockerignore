@@ -1,7 +1,0 @@
-.git
-.mvn/wrapper/maven-wrapper.jar.lastUpdated
-target/
-data/
-uploads/
-local.log
-*.iml

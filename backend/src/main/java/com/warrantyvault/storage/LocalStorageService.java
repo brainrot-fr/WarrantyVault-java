@@ -9,12 +9,10 @@ import java.nio.file.Paths;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import com.warrantyvault.common.ApiException;
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 @Service
-@Profile("local")
 @RequiredArgsConstructor
 public class LocalStorageService implements StorageService {
     private final AppProperties appProperties;

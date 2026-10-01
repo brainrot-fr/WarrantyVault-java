@@ -12,9 +12,9 @@ describe('expiry helpers', () => {
   });
 
   it('marks status correctly by timezone-aware relative days', () => {
-    expect(computeStatus('2024-07-10', '2024-07-01', 30)).toBe('EXPIRING_SOON');
-    expect(computeStatus('2024-07-10', '2024-07-05', 30)).toBe('EXPIRING_SOON');
-    expect(computeStatus('2024-07-10', '2024-07-11', 30)).toBe('EXPIRED');
+    expect(computeStatus('2024-07-10', '2024-07-01')).toBe('EXPIRING_SOON');
+    expect(computeStatus('2024-07-10', '2024-07-05')).toBe('EXPIRING_SOON');
+    expect(computeStatus('2024-07-10', '2024-07-11')).toBe('EXPIRED');
   });
 });
 

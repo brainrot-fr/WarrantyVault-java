@@ -9,7 +9,6 @@ import com.warrantyvault.product.Product;
 import com.warrantyvault.product.ProductRepository;
 import com.warrantyvault.product.CurrencyValueTotal;
 import com.warrantyvault.space.Space;
-import com.warrantyvault.user.NotificationPreferenceRepository;
 import com.warrantyvault.user.User;
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -17,7 +16,6 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class DashboardServiceTest {
@@ -36,13 +34,10 @@ class DashboardServiceTest {
         Product current = product("active", space, LocalDate.parse("2026-10-02"), "5000.00");
         Product expired = product("expired", space, LocalDate.parse("2026-09-30"), "9000.00");
         ProductRepository products = mock(ProductRepository.class);
-        NotificationPreferenceRepository preferences = mock(NotificationPreferenceRepository.class);
         when(products.findAllForDashboard(user.getId())).thenReturn(List.of(current, expired));
         when(products.findCoveredValueTotals(user.getId(), LocalDate.parse("2026-10-01")))
             .thenReturn(List.of(new CurrencyValueTotal("INR", new BigDecimal("5000.00"))));
-        when(preferences.findById(user.getId())).thenReturn(Optional.empty());
-
-        DashboardService service = new DashboardService(products, preferences,
+        DashboardService service = new DashboardService(products,
             Clock.fixed(Instant.parse("2026-10-01T12:00:00Z"), ZoneOffset.UTC));
 
         assertEquals("5000.00", service.getDashboard(user).totalCoveredValue().get("INR"));

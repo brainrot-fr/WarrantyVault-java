@@ -1,73 +1,78 @@
 # Local development
 
-The `local` profile is the Spring default, so the backend, API contracts, domain rules, and frontend match production while infrastructure stays on the developer’s machine. No cloud account or environment file is needed to register, create Spaces, upload product images, invite collaborators, or exercise reminders.
+WarrantyVault is designed to run locally first. The `local` Spring profile uses a file-backed H2 database and local image storage. Registration, Spaces, products, uploads, OCR, JWT authentication, and collaboration work with **zero external accounts or cloud services**.
 
-## Requirements and start commands
+## Prerequisites
 
-Install Java 21 and Node.js 22 with npm. From the repository root, start both applications with:
+- Java 21
+- Node.js 22 and npm
+- Git
 
-```sh
-make local
-```
+No system Maven installation is needed; the Maven wrapper is included. OCR language data is fetched once during frontend dependency installation when it is not already present.
 
-The backend listens on `http://localhost:8080`, writes its output to `backend/local.log`, and the frontend runs in the foreground at `http://localhost:5173`. Press Ctrl+C in the frontend terminal to stop both processes.
+## Run the application
 
-The separate commands are:
-
-```sh
-cd backend && ./mvnw spring-boot:run
-cd frontend && npm install && npm run dev
-```
-
-The explicit backend profile command is also supported:
+Start the backend in one terminal from the repository root:
 
 ```sh
-cd backend && ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
+cd backend
+./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
-The Maven wrapper is committed; a system Maven installation is not required. Keep the browser on `localhost` for both frontend and API during local work so the refresh cookie remains same-site. The Vite development API defaults to `http://localhost:8080`; a production build with no `VITE_API_BASE_URL` shows a configuration error. `frontend/.env.example` documents the variable.
+Start the Vite frontend in another terminal:
 
-`make backend` and `make frontend` start one side individually. `make test` runs Maven verification, frontend lint, frontend tests, and the frontend production build. `make clean-local` asks nothing, prints the local data it removed, and deletes only `backend/data/` and `backend/uploads/`.
+```sh
+cd frontend
+npm ci
+npm run dev
+```
 
-## Demo accounts and seeded records
+Open <http://localhost:5173>. In development, the frontend sends API requests to `http://localhost:8080` by default. No environment variables are required. To start both processes together instead, run `make local` from the repository root.
 
-The local-only seeder creates sample data when the users table is empty:
+## Demo accounts
+
+The local profile seeds sample data on a new database:
 
 | Email | Password | Access |
 | --- | --- | --- |
-| `demo@warrantyvault.local` | `Password123` followed by Unicode U+0021 | Owner of Home and Farmhouse |
-| `family@warrantyvault.local` | `Password123` followed by Unicode U+0021 | Viewer in Home; pending Farmhouse Editor invitation |
+| `demo@warrantyvault.local` | `Password123!` | Owner of the Home and Farmhouse Spaces |
+| `family@warrantyvault.local` | `Password123!` | Viewer in Home with a pending Farmhouse invitation |
 
-The eight generated product records cover active, expiring-soon (10 and 25 days out), and expired warranties. Their sample bills are generated as valid PNGs at startup; no sample binaries are committed. The demo owner has a 30-day reminder threshold. Local invitation mail and reminder digests print to the backend console.
+The sample products include active, expiring-soon, and expired coverage. Invitations are in-app and can be accepted from the invitee's Invitations screen. To test with a clean account, register another user in the application.
 
-Use a newly registered account to test a clean vault. A developer can create Spaces, upload product bills and optional warranty cards, edit product details, use local OCR suggestions, invite another registered or not-yet-registered email, accept/decline invitations, and change reminder preferences. OCR is advisory; the user always reviews the suggested values and can skip it.
+## Local data and reset
 
-## Run reminders and test dates
+- H2 database: `backend/data/warrantyvault` (H2 creates the database files there).
+- Uploaded bills and warranty cards: `backend/uploads/`.
+- Generated demo images: stored in the same local uploads directory.
 
-The Settings screen shows **Developer tools → Run reminder check now** only in local mode. It runs synchronously and prints a digest in the backend console. The local-only endpoint accepts a chosen `asOf` date, which is useful for repeatable time-travel checks without changing the computer clock. For example, get a token by logging in with `POST /api/auth/login`:
+Stop the backend before resetting local data. From the repository root, run:
 
 ```sh
-curl -fsS -X POST 'http://localhost:8080/api/auth/login' \
-  -H 'Content-Type: application/json' \
-  -d '{"email":"demo@warrantyvault.local","password":"Password123\u0021"}'
+make clean-local
 ```
 
-Use the returned `accessToken` as a bearer credential to send `POST` to `http://localhost:8080/api/dev/reminders/run?asOf=2026-09-30&reset=true`.
+This removes only `backend/data/` and `backend/uploads/`. The demo seeder recreates its accounts and sample data the next time the backend starts with an empty database.
 
-The response contains `usersNotified`, `productsReminded`, `failedUsers`, and the run `status`; the complete email body is printed by `ConsoleMailService`. The `asOf` override changes the date used by that run only. Without it, warranty status uses the user’s timezone and configured reminder threshold. Production has no `/api/dev/**` endpoint.
+## OCR without a cloud account
 
-The optional `reset=true` query parameter clears reminder logs before rerunning the check. This is useful for repeating a test against the same eligible product and is available only in the local profile. Do not use it as a routine production operation.
+Receipt OCR runs in the browser with Tesseract.js, its WASM worker, and English language data served by the frontend. OCR processing does not require an OCR provider account or send the image to a hosted recognition service. The first `npm ci` downloads the English trained data (about 23 MB) if it is not already present. Keep the Vite server running for local development; after installation the OCR assets are served from the local checkout, so recognition itself does not need an internet connection. In an installed production PWA, open the app and run OCR once while online so its service worker caches the Tesseract assets for later offline use. OCR results are suggestions that should be reviewed before saving.
 
-## Local infrastructure and files
+## Tests and useful targets
 
-- Database: persistent H2 file at `backend/data/warrantyvault`, configured in MySQL compatibility mode and migrated by Flyway.
-- Images: `backend/uploads/`; local filenames are generated by the application.
-- Email: console mail implementation; no SMTP or cloud account is involved.
-- Frontend: same Vite/React app and API response contracts as production.
-- API: `GET /api/meta/config` reports `mode: "local"`, upload limit, and reminder-day choices. The H2 console is available at `/h2-console` in this profile only.
+Run the full project checks from the repository root:
 
-`make clean-local` removes local database and uploaded-image data. It does not remove source, npm dependencies, generated frontend icons, or Tesseract assets.
+```sh
+make test
+```
 
-## Offline preparation
+This runs `./mvnw -B verify` in the backend and frontend lint, tests, and production build. The individual checks are:
 
-An offline first install requires Java and npm dependency caches to be warmed while connected. The Tesseract worker, core WASM, and English language data are copied into `frontend/public/tesseract/` by the frontend asset script; keep those local files for disconnected rebuilds. The PWA precaches the app shell and OCR files after install. Authenticated API data is not documented as available offline until the PWA caching behavior has been verified. Offline writes are unsupported, and product creation and changes remain disabled until connectivity returns.
+```sh
+cd backend && ./mvnw -B verify
+cd frontend && npm run lint
+cd frontend && npm test
+cd frontend && npm run build
+```
+
+Other targets are `make backend`, `make frontend`, and `make local`.

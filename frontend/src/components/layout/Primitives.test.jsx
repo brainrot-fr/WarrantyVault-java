@@ -63,8 +63,8 @@ describe('Field', () => {
 
     it('exposes switch state to assistive technology and supports toggling', () => {
       const onChange = vi.fn();
-      render(<SwitchControl checked={false} label="Warranty reminders" onChange={onChange} />);
-      const toggle = screen.getByRole('switch', { name: 'Warranty reminders' });
+      render(<SwitchControl checked={false} label="Share warranty card" onChange={onChange} />);
+      const toggle = screen.getByRole('switch', { name: 'Share warranty card' });
       expect(toggle.checked).toBe(false);
       fireEvent.click(toggle);
       expect(onChange).toHaveBeenCalledOnce();

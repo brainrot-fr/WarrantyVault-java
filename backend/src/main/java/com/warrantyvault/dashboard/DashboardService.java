@@ -3,7 +3,7 @@ package com.warrantyvault.dashboard;
 import com.warrantyvault.product.Product;
 import com.warrantyvault.product.ProductRepository;
 import com.warrantyvault.product.CurrencyValueTotal;
-import com.warrantyvault.user.NotificationPreferenceRepository;
+import com.warrantyvault.product.ProductResponse;
 import com.warrantyvault.user.User;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -20,20 +20,15 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class DashboardService {
-    private static final int DEFAULT_REMINDER_DAYS = 30;
     private static final int RECENT_EXPIRY_DAYS = 90;
     private static final int UPCOMING_LIMIT = 50;
     private static final int RECENTLY_EXPIRED_LIMIT = 20;
 
     private final ProductRepository productRepository;
-    private final NotificationPreferenceRepository preferenceRepository;
     private final Clock clock;
 
-    public DashboardService(ProductRepository productRepository,
-                           NotificationPreferenceRepository preferenceRepository,
-                           Clock clock) {
+    public DashboardService(ProductRepository productRepository, Clock clock) {
         this.productRepository = productRepository;
-        this.preferenceRepository = preferenceRepository;
         this.clock = clock;
     }
 
@@ -41,9 +36,7 @@ public class DashboardService {
     public DashboardResponse getDashboard(User user) {
         ZoneId zone = ZoneId.of(user.getTimezone());
         LocalDate today = LocalDate.now(clock.withZone(zone));
-        int thresholdDays = preferenceRepository.findById(user.getId())
-            .map(preference -> preference.getDaysBefore())
-            .orElse(DEFAULT_REMINDER_DAYS);
+        int thresholdDays = ProductResponse.EXPIRING_SOON_DAYS;
 
         List<Product> products = productRepository.findAllForDashboard(user.getId());
 

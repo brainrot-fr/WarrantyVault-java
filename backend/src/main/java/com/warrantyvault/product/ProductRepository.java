@@ -15,21 +15,6 @@ public interface ProductRepository extends JpaRepository<Product, String> {
     List<Product> findBySpace(Space space);
     long countBySpace(Space space);
 
-    @Query("""
-        select distinct p from Product p
-        join fetch p.space
-        join SpaceMember membership on membership.space = p.space
-        where membership.user.id = :userId
-          and p.expiresOn between :today and :lastCoveredDay
-          and not exists (
-            select log.id from ReminderLog log
-            where log.user.id = :userId and log.product = p and log.expiresOn = p.expiresOn
-          )
-        """)
-    List<Product> findUnloggedReminderProducts(@Param("userId") String userId,
-                                               @Param("today") LocalDate today,
-                                               @Param("lastCoveredDay") LocalDate lastCoveredDay);
-
     @Query("select p from Product p join fetch p.space join fetch p.createdBy where p.space.id = :spaceId")
     List<Product> findBySpaceIdWithResponseDetails(@Param("spaceId") String spaceId);
 

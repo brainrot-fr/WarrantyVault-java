@@ -7,8 +7,7 @@ export function invalidateAfterProductChange(queryClient, userId, spaceId, produ
   if (productId) queryClient.invalidateQueries({ queryKey: ['product', userId, productId] });
 }
 
-export function invalidateAfterPreferenceChange(queryClient, userId) {
-  queryClient.invalidateQueries({ queryKey: ['notification-preferences', userId] });
+export function invalidateAfterProfileChange(queryClient, userId) {
   queryClient.invalidateQueries({ queryKey: ['dashboard', userId] });
   queryClient.invalidateQueries({ queryKey: ['spaces', userId] });
   queryClient.invalidateQueries({ queryKey: ['space', userId] });

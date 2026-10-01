@@ -12,10 +12,10 @@ import { useAuth } from '@/lib/auth.jsx';
 import { useTheme } from '@/lib/theme.jsx';
 import { useOnlineStatus } from '@/lib/online.jsx';
 import { apiJson, apiRequest } from '@/lib/api.js';
-import { invalidateAfterPreferenceChange, invalidateAfterProductChange } from '@/lib/queryInvalidation.js';
+import { invalidateAfterProfileChange, invalidateAfterProductChange } from '@/lib/queryInvalidation.js';
 import { formatCurrency, formatDate, formatDateTime, currencySymbol, localDateInputValue } from '@/lib/formatters.js';
 import { formatPriceInput, normalizePrice } from '@/lib/formValidation.js';
-import { changePasswordSchema, customReminderSchema, inviteSchema, loginSchema, productSchema, profileSchema, registrationSchema, spaceSchema } from '@/lib/formSchemas.js';
+import { changePasswordSchema, inviteSchema, loginSchema, productSchema, profileSchema, registrationSchema, spaceSchema } from '@/lib/formSchemas.js';
 import { focusFieldAfterRender, focusFirstErrorAfterRender, mapServerFieldErrors } from '@/lib/formErrors.js';
 import { parseBill } from '@/lib/parseBill.js';
 import { prepareImage } from '@/lib/prepareImage.js';
@@ -382,7 +382,6 @@ export function DashboardPage() {
               <p key={currency}><strong>{formatCurrency(value, currency)}</strong><span>{currency}</span></p>
             )) : <p><span>No product values yet</span></p>}
           </div>
-          <Link className="text-link" to="/settings">Change reminder timing <ArrowRight aria-hidden="true" size={15} /></Link>
           </>
           )}
         </aside> : null}
@@ -752,9 +751,7 @@ export function SpaceMembersPage() {
     }),
     onSuccess: (invitation) => {
       inviteForm.reset({ email: '', role: 'VIEWER' });
-      toast.success(invitation.emailSent === false
-        ? 'Invitation saved, but the email could not be sent.'
-        : 'Invitation sent');
+      toast.success('Invitation created. The invitee can accept it from their invitations list.');
       invalidate();
     },
     onError: (requestError) => {
@@ -1438,7 +1435,7 @@ export function ProductFormPage({ editing = false }) {
   );
 }
 
-/* Preflight: desktop=vertical account sections; mobile=wrapped controls; empty=default preference values; loading=preference status; error=retry preference query and mutation errors; success=save toast and updated profile; keyboard=native controls and buttons; announcement=role status/toasts; offline=profile/password/reminder writes disabled; restoration=reload server preferences, sign out returns to login. */
+/* Preflight: desktop=vertical account sections; mobile=wrapped controls; empty=not applicable; loading=profile form; error=profile/password errors; success=save toast and updated profile; keyboard=native controls and buttons; announcement=role status/toasts; offline=profile/password writes disabled; restoration=reload profile, sign out returns to login. */
 export function SettingsPage() {
   const queryClientRef = useQueryClient();
   const { user, updateUser, logout } = useAuth();
@@ -1462,39 +1459,6 @@ export function SettingsPage() {
   const passwordErrors = passwordForm.formState.errors;
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const [customDaysOpen, setCustomDaysOpen] = useState(false);
-  const customDaysFormRef = useRef(null);
-  const customDaysForm = useForm({
-    resolver: zodResolver(customReminderSchema),
-    defaultValues: { daysBefore: '' }
-  });
-  const customDaysError = customDaysForm.formState.errors.daysBefore?.message;
-  const [resetReminderRun, setResetReminderRun] = useState(false);
-  const preferencesQuery = useQuery({
-    queryKey: ['notification-preferences', user?.id],
-    queryFn: () => apiJson('/api/me/notification-preferences')
-  });
-  const preferences = preferencesQuery.data;
-  const { data: meta } = useQuery({
-    queryKey: ['meta-config'],
-    queryFn: () => apiJson('/api/meta/config')
-  });
-  const savePreferences = useMutation({
-    mutationFn: (next) => apiJson('/api/me/notification-preferences', {
-      method: 'PUT',
-      body: JSON.stringify(next)
-    }),
-    onSuccess: (next) => {
-      queryClientRef.setQueryData(['notification-preferences', user.id], next);
-      invalidateAfterPreferenceChange(queryClientRef, user.id);
-      setCustomDaysOpen(false);
-      toast.success('Reminder preferences saved');
-    },
-    onError: (requestError) => {
-      const invalidFields = mapServerFieldErrors(requestError.fieldErrors, customDaysForm.setError);
-      if (invalidFields.length) focusFieldAfterRender(invalidFields[0], customDaysFormRef.current);
-    }
-  });
   const saveProfile = useMutation({
     mutationFn: (profile) => apiJson('/api/me', {
       method: 'PATCH',
@@ -1507,7 +1471,7 @@ export function SettingsPage() {
         timezone: updatedUser.timezone || 'UTC',
         currency: updatedUser.currency || 'INR'
       });
-      invalidateAfterPreferenceChange(queryClientRef, user.id);
+      invalidateAfterProfileChange(queryClientRef, user.id);
       toast.success('Account details saved');
     },
     onError: (requestError) => {
@@ -1534,12 +1498,6 @@ export function SettingsPage() {
       if (invalidFields.length) focusFieldAfterRender(invalidFields[0], passwordFormRef.current);
     }
   });
-  const runReminderCheck = useMutation({
-    mutationFn: () => apiJson(`/api/dev/reminders/run?reset=${resetReminderRun}`, { method: 'POST' }),
-    onSuccess: (summary) => toast.success(summary.productsReminded === 0
-      ? 'Nothing is due, or reminders were already sent. Tick Send again to repeat.'
-      : `Reminder check finished: ${summary.productsReminded} product(s), ${summary.usersNotified} user(s)`)
-  });
   const online = useOnlineStatus();
   const signOut = async () => {
     try {
@@ -1553,7 +1511,6 @@ export function SettingsPage() {
   return (
     <AppShell title="Your account">
       <section className="content-column settings-content">
-        <ErrorMessage error={preferencesQuery.error || savePreferences.error} onRetry={() => preferencesQuery.refetch()} />
         <section className="settings-section">
           <header className="section-heading"><h2>Profile</h2></header>
           <div className="settings-row"><span>Email</span><strong>{user?.email}</strong></div>
@@ -1601,54 +1558,6 @@ export function SettingsPage() {
               </div>
             </FormStack>
           </Sheet>
-        ) : null}
-        <section className="settings-section">
-        <header className="section-heading"><h2>Reminders</h2></header>
-        <p className="settings-help">Receive at most one daily email with warranties approaching their end date.</p>
-        <div className="settings-row">
-          {preferencesQuery.isLoading ? <span role="status">Loading…</span> : preferences ? (
-            <div className="preference-controls">
-              <SwitchControl checked={preferences.remindersEnabled} disabled={!online || savePreferences.isPending} label="Warranty reminders" onChange={(event) => savePreferences.mutate({ ...preferences, remindersEnabled: event.target.checked })} />
-              {preferences.remindersEnabled ? (
-                <label className="days-select">
-                  <span className="sr-only">Days before expiry</span>
-                  <select
-                    value={[7, 14, 30, 45, 60, 90].includes(preferences.daysBefore) ? preferences.daysBefore : 'custom'}
-                    disabled={!online || savePreferences.isPending}
-                    onChange={(event) => {
-                      if (event.target.value === 'custom') {
-                        customDaysForm.reset({ daysBefore: String(preferences.daysBefore) });
-                        setCustomDaysOpen(true);
-                      }
-                      else savePreferences.mutate({ ...preferences, daysBefore: Number(event.target.value) });
-                    }}
-                  >
-                    {[7, 14, 30, 45, 60, 90].map((days) => <option key={days} value={days}>{days} days before</option>)}
-                    {![7, 14, 30, 45, 60, 90].includes(preferences.daysBefore) ? <option value="custom">Custom · {preferences.daysBefore} days</option> : <option value="custom">Custom</option>}
-                  </select>
-                </label>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-        {customDaysOpen && preferences?.remindersEnabled ? (
-          <FormStack className="custom-days-row" onSubmit={customDaysForm.handleSubmit(({ daysBefore }) => savePreferences.mutate({ ...preferences, daysBefore }), (invalid) => focusFirstErrorAfterRender(invalid, customDaysFormRef.current))} ref={customDaysFormRef}>
-            <Field aria-label="Custom reminder days" error={customDaysError} hint="Choose a number from 1 to 120." label="Days before expiry" max="120" min="1" type="number" {...customDaysForm.register('daysBefore')} />
-            <button className="text-button" disabled={!online || savePreferences.isPending} type="submit">Save timing</button>
-            <button className="text-button" onClick={() => setCustomDaysOpen(false)} type="button">Cancel</button>
-          </FormStack>
-        ) : null}
-        </section>
-        {meta?.mode === 'local' ? (
-          <div className="developer-tools">
-            <p className="eyebrow">DEVELOPER TOOLS</p>
-            <p>Run the local reminder workflow and print digest emails in the backend console.</p>
-            <SwitchControl checked={resetReminderRun} label="Send again even if already sent" onChange={(event) => setResetReminderRun(event.target.checked)} />
-            <button className="text-button" disabled={!online || runReminderCheck.isPending} onClick={() => runReminderCheck.mutate()} type="button">
-              {runReminderCheck.isPending ? 'Checking…' : 'Run reminder check now'}
-            </button>
-            <ErrorMessage error={runReminderCheck.error} />
-          </div>
         ) : null}
       </section>
     </AppShell>

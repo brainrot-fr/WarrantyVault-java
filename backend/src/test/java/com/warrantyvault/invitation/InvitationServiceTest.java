@@ -6,8 +6,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import com.warrantyvault.common.ApiException;
-import com.warrantyvault.config.AppProperties;
-import com.warrantyvault.mail.MailService;
 import com.warrantyvault.member.SpaceMember;
 import com.warrantyvault.member.SpaceMemberRepository;
 import com.warrantyvault.security.CurrentUser;
@@ -28,7 +26,7 @@ class InvitationServiceTest {
     private final CurrentUser currentUser = mock(CurrentUser.class);
     private final UserRepository users = mock(UserRepository.class);
     private final InvitationService service = new InvitationService(invitations, members, mock(SpaceRepository.class),
-        users, currentUser, mock(MailService.class), new AppProperties(),
+        users, currentUser,
         Clock.fixed(Instant.parse("2026-10-01T00:00:00Z"), ZoneOffset.UTC));
     private final User invitee = user("invitee@example.test");
     private final Space space = new Space();

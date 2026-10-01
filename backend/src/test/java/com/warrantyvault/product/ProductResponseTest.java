@@ -12,11 +12,11 @@ import org.junit.jupiter.api.Test;
 
 class ProductResponseTest {
     @Test
-    void keepsCoverageValidThroughExpiryAndAppliesReminderBoundary() {
+    void keepsCoverageValidThroughExpiryAndAppliesExpiryStatusBoundary() {
         Product product = product("2025-01-01", "2025-02-01", 1);
 
-        ProductResponse onExpiryDay = ProductResponse.from(product, SpaceRole.EDITOR, LocalDate.parse("2025-02-01"), 30);
-        ProductResponse oneDayPastExpiry = ProductResponse.from(product, SpaceRole.VIEWER, LocalDate.parse("2025-02-02"), 30);
+        ProductResponse onExpiryDay = ProductResponse.from(product, SpaceRole.EDITOR, LocalDate.parse("2025-02-01"));
+        ProductResponse oneDayPastExpiry = ProductResponse.from(product, SpaceRole.VIEWER, LocalDate.parse("2025-02-02"));
 
         assertEquals("EXPIRING_SOON", onExpiryDay.status());
         assertEquals(0, onExpiryDay.daysRemaining());
@@ -27,12 +27,12 @@ class ProductResponseTest {
     }
 
     @Test
-    void marksTheInclusiveReminderThresholdAndClampsElapsedFraction() {
+    void marksTheInclusiveExpiringSoonThresholdAndClampsElapsedFraction() {
         Product product = product("2024-01-01", "2025-01-01", 12);
 
-        ProductResponse atThreshold = ProductResponse.from(product, SpaceRole.OWNER, LocalDate.parse("2024-12-02"), 30);
-        ProductResponse beforePurchase = ProductResponse.from(product, SpaceRole.OWNER, LocalDate.parse("2023-12-31"), 30);
-        ProductResponse afterExpiry = ProductResponse.from(product, SpaceRole.OWNER, LocalDate.parse("2025-02-01"), 30);
+        ProductResponse atThreshold = ProductResponse.from(product, SpaceRole.OWNER, LocalDate.parse("2024-12-02"));
+        ProductResponse beforePurchase = ProductResponse.from(product, SpaceRole.OWNER, LocalDate.parse("2023-12-31"));
+        ProductResponse afterExpiry = ProductResponse.from(product, SpaceRole.OWNER, LocalDate.parse("2025-02-01"));
 
         assertEquals("EXPIRING_SOON", atThreshold.status());
         assertEquals(30, atThreshold.daysRemaining());

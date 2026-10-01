@@ -18,8 +18,8 @@ public class MetaController {
 
     @GetMapping("/meta/config")
     public MetaConfig config() {
-        return new MetaConfig(environment.matchesProfiles("prod") ? "production" : "local", maxUploadBytes, new int[]{7,14,30,60,90,120});
+        return new MetaConfig(environment.matchesProfiles("prod") ? "production" : "local", maxUploadBytes);
     }
 
-    public record MetaConfig(String mode, long maxUploadBytes, int[] reminderDaysOptions) {}
+    public record MetaConfig(String mode, long maxUploadBytes) {}
 }

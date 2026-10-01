@@ -248,18 +248,6 @@
 .accept-link { color: var(--accent); font-weight: 600; }
 .pending-invitations { margin-top: 2.5rem; }
 .pending-invitations h2 { margin: 0 0 1rem; font: 400 1.65rem/1.2 var(--font-display); }
-.preference-controls { display: flex; align-items: center; gap: 1rem; }
-.reminder-toggle { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--ink); font-size: 0.9rem; }
-.days-select select {
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-control);
-  padding: 0.45rem 0.6rem;
-  color: var(--ink);
-  background: var(--raised);
-}
-.developer-tools { margin-top: 2.5rem; padding-top: 1.4rem; border-top: 1px solid var(--hairline); }
-.developer-tools > p:not(.eyebrow) { color: var(--ink-muted); font-size: 0.9rem; }
-.developer-tools .text-button { color: var(--accent); margin-top: 0.75rem; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 
 .site-footer {
