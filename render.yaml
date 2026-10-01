@@ -6,7 +6,7 @@ services:
     rootDir: backend
     dockerfilePath: ./Dockerfile
     healthCheckPath: /api/health
-    autoDeploy: true
+    autoDeployTrigger: checksPass
     envVars:
       - key: SPRING_PROFILES_ACTIVE
         value: prod
@@ -36,3 +36,5 @@ services:
         sync: false
       - key: COOKIE_SAMESITE
         value: Lax
+      - key: COOKIE_DOMAIN
+        sync: false

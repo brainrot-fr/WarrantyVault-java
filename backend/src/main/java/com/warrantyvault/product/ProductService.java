@@ -60,8 +60,10 @@ public class ProductService {
         this.preferenceRepository = preferenceRepository;
     }
 
+    @Transactional(readOnly = true)
     public List<Product> listProducts(String spaceId, String userId) {
-        return productRepository.findBySpace(requireMembership(spaceId, userId).getSpace());
+        SpaceMember membership = requireMembership(spaceId, userId);
+        return productRepository.findBySpaceIdWithResponseDetails(membership.getSpace().getId());
     }
 
     @Transactional
@@ -109,7 +111,8 @@ public class ProductService {
     @Transactional
     public Product updateProduct(String productId, String userId, ProductUpdateRequest request,
                                  MultipartFile bill, MultipartFile warrantyCard) {
-        Product product = productRepository.findById(productId).orElseThrow(() -> new ApiException("NOT_FOUND", "Product not found", 404));
+        Product product = productRepository.findByIdWithResponseDetails(productId)
+            .orElseThrow(() -> new ApiException("NOT_FOUND", "Product not found", 404));
         SpaceMember membership = requireMembership(product.getSpace().getId(), userId);
         if (!SpacePermissions.canEditProduct(membership.getRole())) {
             throw new ApiException("FORBIDDEN", "You cannot edit products in this Space", 403);
@@ -158,12 +161,15 @@ public class ProductService {
         return saved;
     }
 
+    @Transactional(readOnly = true)
     public Product getProduct(String productId, String userId) {
-        Product product = productRepository.findById(productId).orElseThrow(() -> new ApiException("NOT_FOUND", "Product not found", 404));
+        Product product = productRepository.findByIdWithResponseDetails(productId)
+            .orElseThrow(() -> new ApiException("NOT_FOUND", "Product not found", 404));
         requireMembership(product.getSpace().getId(), userId);
         return product;
     }
 
+    @Transactional(readOnly = true)
     public ProductResponse productResponse(Product product, String userId) {
         SpaceMember membership = requireMembership(product.getSpace().getId(), userId);
         User user = membership.getUser();
@@ -172,6 +178,7 @@ public class ProductService {
         return ProductResponse.from(product, membership.getRole(), today, daysBefore);
     }
 
+    @Transactional(readOnly = true)
     public ProductPage listProductResponses(String spaceId, String userId, String query, String status, String type,
                                             String sort, int page, int size) {
         if (page < 0 || size < 1 || size > 100) throw new ApiException("VALIDATION_FAILED", "Page must be nonnegative and size must be between 1 and 100", 400);
@@ -181,8 +188,12 @@ public class ProductService {
         if (sort != null && !List.of("expiry", "purchased", "name").contains(sort)) {
             throw new ApiException("VALIDATION_FAILED", "Unsupported product sort order", 400);
         }
-        List<ProductResponse> items = listProducts(spaceId, userId).stream()
-            .map(product -> productResponse(product, userId))
+        SpaceMember membership = requireMembership(spaceId, userId);
+        User user = membership.getUser();
+        int daysBefore = preferenceRepository.findById(userId).map(pref -> pref.getDaysBefore()).orElse(30);
+        LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(user.getTimezone())));
+        List<ProductResponse> items = productRepository.findBySpaceIdWithResponseDetails(spaceId).stream()
+            .map(product -> ProductResponse.from(product, membership.getRole(), today, daysBefore))
             .filter(product -> status == null || status.equals(product.status()))
             .filter(product -> type == null || type.isBlank() || product.productType().equalsIgnoreCase(type))
             .filter(product -> query == null || query.isBlank() || (
@@ -215,10 +226,10 @@ public class ProductService {
     public ProductController.ProductFacets facets(String userId) {
         Set<String> types = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
         Set<String> brands = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-        spaceRepository.findByUserId(userId).forEach(space -> productRepository.findBySpace(space).forEach(product -> {
-            types.add(product.getProductType());
-            brands.add(product.getBrand());
-        }));
+        productRepository.findDistinctFacetsForUser(userId).forEach(facet -> {
+            types.add(facet.productType());
+            brands.add(facet.brand());
+        });
         return new ProductController.ProductFacets(List.copyOf(types), List.copyOf(brands));
     }
 

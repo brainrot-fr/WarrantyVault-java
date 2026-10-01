@@ -1,38 +1,35 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, Navigate, useBlocker, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Controller, useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import { keepPreviousData, useInfiniteQuery, useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { ArrowRight, ChevronRight, Plus } from 'lucide-react';
 import { computeExpiresOn } from '@/lib/expiry.js';
 import { AppShell } from '@/components/layout/AppShell';
-import { ConfirmSheet, EmptyState, Field, Figure, KeyValue, ListRow, Region, Section, Sheet, Skeleton, StatusMark, WarrantyLine } from '@/components/layout/Primitives.jsx';
+import { ConfirmSheet, EmptyState, Field, Figure, FreeTextCombobox, FormStack, ImagePicker, KeyValue, ListRow, Region, Section, Sheet, Skeleton, StatusMark, SwitchControl, WarrantyLine } from '@/components/layout/Primitives.jsx';
 import { useAuth } from '@/lib/auth.jsx';
 import { useTheme } from '@/lib/theme.jsx';
 import { useOnlineStatus } from '@/lib/online.jsx';
-import { apiJson, apiRequest, getApiConfigurationError } from '@/lib/api.js';
+import { apiJson, apiRequest } from '@/lib/api.js';
+import { invalidateAfterPreferenceChange, invalidateAfterProductChange } from '@/lib/queryInvalidation.js';
+import { formatCurrency, formatDate, formatDateTime, currencySymbol, localDateInputValue } from '@/lib/formatters.js';
+import { formatPriceInput, normalizePrice } from '@/lib/formValidation.js';
+import { changePasswordSchema, customReminderSchema, inviteSchema, loginSchema, productSchema, profileSchema, registrationSchema, spaceSchema } from '@/lib/formSchemas.js';
+import { focusFieldAfterRender, focusFirstErrorAfterRender, mapServerFieldErrors } from '@/lib/formErrors.js';
 import { parseBill } from '@/lib/parseBill.js';
 import { prepareImage } from '@/lib/prepareImage.js';
 import { BRAND_DICTIONARY, PRODUCT_TYPE_DICTIONARY } from '@/lib/ocr/dictionaries.js';
 import '../app.css';
 
-/* Preflight: desktop=single text column; mobile=same flow; empty=not applicable; loading=not applicable; error=API URL instructions; success=correct URL boots app; keyboard=static content; announcement=role alert; offline=no writes; restoration=reload after configuring API URL. */
-export function ConfigurationError() {
-  return (
-    <main className="configuration-error" role="alert">
-      <p className="eyebrow">WARRANTYVAULT CONFIGURATION</p>
-      <h1>Connect your WarrantyVault API</h1>
-      <p>{getApiConfigurationError()}</p>
-    </main>
-  );
-}
-
 /* Preflight: desktop=shared shell skeleton; mobile=shared shell skeleton; empty=not applicable; loading=delayed shell skeleton; error=bootstrap banner and anonymous route; success=restored user shell; keyboard=normal tab order; announcement=restoring status; offline=login path remains reachable; restoration=refresh cookie bootstrap. */
-function LoadingScreen() {
+function LoadingScreen({ waking = false }) {
   return (
     <main className="loading-screen" aria-label="Restoring your session">
       <div className="loading-mark">WarrantyVault</div>
       <Skeleton rows={4} />
       <p>Restoring your session</p>
+      {waking ? <p>The server is waking up. This can take up to a minute.</p> : null}
     </main>
   );
 }
@@ -49,9 +46,9 @@ function ErrorMessage({ error, onRetry }) {
 
 /* Preflight: desktop=child route; mobile=child route; empty=child owns its empty state; loading=auth shell skeleton; error=bootstrap banner; success=authorized child; keyboard=child controls; announcement=route title; offline=protected cache/read behavior; restoration=refresh token, then next-path login redirect if expired. */
 export function ProtectedPage({ children }) {
-  const { status } = useAuth();
-  if (status === 'loading') return <LoadingScreen />;
-  if (status !== 'authenticated') return <Navigate to={`/login?next=${encodeURIComponent(window.location.pathname)}`} replace />;
+  const { status, bootstrapWaiting } = useAuth();
+  if (status === 'loading') return <LoadingScreen waking={bootstrapWaiting} />;
+  if (status !== 'authenticated') return <Navigate to={`/login?next=${encodeURIComponent(`${window.location.pathname}${window.location.search}`)}`} replace />;
   return children;
 }
 
@@ -95,18 +92,24 @@ export function LandingPage() {
 
 /* Preflight: desktop=statement and form columns; mobile=stacked statement/form; empty=blank form; loading=submit pending label; error=inline role-alert; success=authenticated redirect; keyboard=native fields and submit; announcement=errors and pending text; offline=submit error, no writes; restoration=retry credentials or next-path destination. */
 export function AuthPage({ registration = false }) {
-  const { login, register } = useAuth();
+  const { login, register, status } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const [values, setValues] = useState({ name: '', email: '', password: '' });
+  const formRef = useRef(null);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const form = useForm({
+    resolver: zodResolver(registration ? registrationSchema : loginSchema),
+    defaultValues: { name: '', email: '', password: '', confirmPassword: '' },
+    mode: 'onBlur'
+  });
+  const { errors } = form.formState;
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const { data: meta } = useQuery({
     queryKey: ['meta-config'],
     queryFn: () => apiJson('/api/meta/config')
   });
-  const submit = async (event) => {
-    event.preventDefault();
+  const submit = async (values) => {
     setBusy(true);
     setError(null);
     try {
@@ -116,12 +119,14 @@ export function AuthPage({ registration = false }) {
       navigate(next?.startsWith('/') && !next.startsWith('//') ? next : '/dashboard', { replace: true });
     } catch (requestError) {
       setError(requestError);
+      const invalidFields = mapServerFieldErrors(requestError.fieldErrors, form.setError);
+      if (invalidFields.length) focusFieldAfterRender(invalidFields[0], formRef.current);
     } finally {
       setBusy(false);
     }
   };
-  const change = (event) => setValues((current) => ({ ...current, [event.target.name]: event.target.value }));
 
+  if (status === 'authenticated') return <Navigate to="/dashboard" replace />;
   return (
     <AppShell publicPage>
       <div className="auth-layout">
@@ -130,20 +135,16 @@ export function AuthPage({ registration = false }) {
           <h1 className="entry-title">{registration ? 'Keep the details that matter.' : 'Your warranties, kept close.'}</h1>
           <p>{registration ? 'Bring bills and coverage dates together in one private place.' : 'Sign in to find the receipts and coverage dates you have saved.'}</p>
         </section>
-        <form className="form-column" onSubmit={submit}>
+        <FormStack className="form-column" onSubmit={form.handleSubmit(submit, (invalid) => focusFirstErrorAfterRender(invalid, formRef.current))} ref={formRef}>
           <h2>{registration ? 'Create your vault' : 'Sign in'}</h2>
           {registration ? (
-            <label className="field">
-              <span>Your name</span>
-              <input autoComplete="name" name="name" onChange={change} required value={values.name} maxLength={120} />
-            </label>
+            <Field autoComplete="name" error={errors.name?.message} label="Your name" maxLength={120} placeholder="e.g. Alex Morgan" {...form.register('name')} />
           ) : null}
-          <Field label="Email address">{() => <input autoComplete="email" name="email" onChange={change} required type="email" value={values.email} />}</Field>
-          <label className="field">
-            <span>Password</span>
-            <input autoComplete={registration ? 'new-password' : 'current-password'} minLength={8} name="password" onChange={change} required type="password" value={values.password} />
-            {registration ? <small>Use 8–72 characters.</small> : null}
-          </label>
+          <Field autoComplete="email" error={errors.email?.message} label="Email address" placeholder="e.g. name@example.com" type="email" {...form.register('email')} />
+          <Field autoComplete={registration ? 'new-password' : 'current-password'} error={errors.password?.message} hint={registration ? 'Use 8 to 72 UTF-8 bytes. Longer passwords are harder to guess.' : undefined} label="Password" type={passwordVisible ? 'text' : 'password'} {...form.register('password')}>
+            {(props) => <div className="password-control"><input {...props} /><button aria-label={passwordVisible ? 'Hide password' : 'Show password'} aria-pressed={passwordVisible} className="password-toggle" onClick={() => setPasswordVisible((visible) => !visible)} type="button">{passwordVisible ? 'Hide' : 'Show'}</button></div>}
+          </Field>
+          {registration ? <Field autoComplete="new-password" error={errors.confirmPassword?.message} label="Confirm password" type={passwordVisible ? 'text' : 'password'} {...form.register('confirmPassword')} /> : null}
           <ErrorMessage error={error} />
           <button className="button button-primary form-submit" disabled={busy} type="submit">
             {busy ? 'Please wait…' : registration ? 'Create account' : 'Sign in'}
@@ -155,7 +156,7 @@ export function AuthPage({ registration = false }) {
             {registration ? 'Already have an account? ' : 'New to WarrantyVault? '}
             <Link to={registration ? '/login' : '/register'}>{registration ? 'Sign in' : 'Create an account'}</Link>
           </p>
-        </form>
+        </FormStack>
       </div>
     </AppShell>
   );
@@ -163,42 +164,56 @@ export function AuthPage({ registration = false }) {
 
 /* Preflight: desktop=Space list and preview aside; mobile=stacked list; empty=first-Space action; loading=delayed row skeleton; error=retry query; success=created toast and refreshed list; keyboard=links plus focus-managed create sheet; announcement=errors/toast; offline=creation disabled; restoration=React Query refresh from server/cache. */
 export function SpacesPage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const queryClientRef = useQueryClient();
+  const { user } = useAuth();
   const online = useOnlineStatus();
   const { data: spaces = [], isLoading, error } = useQuery({
-    queryKey: ['spaces'],
+    queryKey: ['spaces', user?.id],
     queryFn: () => apiJson('/api/spaces')
   });
-  const [name, setName] = useState('');
-  const [description, setDescription] = useState('');
-  const [showCreate, setShowCreate] = useState(false);
+  const createFormRef = useRef(null);
+  const createForm = useForm({
+    resolver: zodResolver(spaceSchema),
+    defaultValues: { name: searchParams.get('create') === '1' ? 'Home' : '', description: '' }
+  });
+  const createErrors = createForm.formState.errors;
+  const [showCreate, setShowCreate] = useState(() => searchParams.get('create') === '1');
+  const [addAfterCreate] = useState(() => searchParams.get('add') === '1');
   const [selectedId, setSelectedId] = useState('');
   const selectedSpace = spaces.find((space) => space.id === selectedId) || spaces[0];
   const previewQueries = useQueries({
     queries: [
       {
-        queryKey: ['space-preview-products', selectedSpace?.id],
+        queryKey: ['space-preview-products', user?.id, selectedSpace?.id],
         queryFn: () => apiJson(`/api/spaces/${selectedSpace.id}/products?size=3&sort=expiry`),
         enabled: Boolean(selectedSpace?.id)
       },
       {
-        queryKey: ['space-preview-members', selectedSpace?.id],
+        queryKey: ['space-preview-members', user?.id, selectedSpace?.id],
         queryFn: () => apiJson(`/api/spaces/${selectedSpace.id}/members`),
         enabled: Boolean(selectedSpace?.id)
       }
     ]
   });
   const create = useMutation({
-    mutationFn: () => apiJson('/api/spaces', {
+    mutationFn: (values) => apiJson('/api/spaces', {
       method: 'POST',
-      body: JSON.stringify({ name, description: description || null })
+      body: JSON.stringify({ name: values.name, description: values.description || null })
     }),
-    onSuccess: () => {
-      setName('');
-      setDescription('');
+    onSuccess: (space) => {
+      createForm.reset({ name: '', description: '' });
       setShowCreate(false);
       toast.success('Space created');
-      queryClientRef.invalidateQueries({ queryKey: ['spaces'] });
+      queryClientRef.invalidateQueries({ queryKey: ['spaces', user?.id] });
+      if (addAfterCreate) {
+        navigate(`/spaces/${space.id}/products/new`, { replace: true });
+      }
+    },
+    onError: (requestError) => {
+      const invalidFields = mapServerFieldErrors(requestError.fieldErrors, createForm.setError);
+      if (invalidFields.length) focusFieldAfterRender(invalidFields[0], createFormRef.current);
     }
   });
 
@@ -207,7 +222,7 @@ export function SpacesPage() {
       <div className="spaces-split">
         <section className="spaces-main">
           <p className="section-intro">Spaces group the things you own by place. Each one keeps products, bills, and collaborators together.</p>
-          {error ? <ErrorMessage error={error} onRetry={() => queryClientRef.invalidateQueries({ queryKey: ['spaces'] })} /> : null}
+          {error ? <ErrorMessage error={error} onRetry={() => queryClientRef.invalidateQueries({ queryKey: ['spaces', user?.id] })} /> : null}
           {isLoading ? <Skeleton rows={6} /> : (
             <div className="line-list">
               {spaces.map((space) => (
@@ -220,7 +235,7 @@ export function SpacesPage() {
                   to={`/spaces/${space.id}`}
                 >
                   <span><strong>{space.name}</strong>{space.myRole !== 'OWNER' ? <small>{space.myRole.toLowerCase()}</small> : null}{space.description ? <small>{space.description}</small> : null}</span>
-                  <span className="space-row-meta"><span>{space.productCount} products</span><small>{space.nextExpiry ? `Next expiry ${space.nextExpiry.expiresOn}` : 'No expiry dates'}</small></span>
+                  <span className="space-row-meta"><span>{space.productCount} products</span><small>{space.nextExpiry ? `Next expiry ${formatDate(space.nextExpiry.expiresOn)}` : 'No expiry dates'}</small></span>
                 </Link>
               ))}
               {!spaces.length ? <EmptyState title="Spaces group the things you own by place." detail="Start with Home, then add another space whenever it helps." action={<button className="text-button" disabled={!online} onClick={() => setShowCreate(true)} type="button">Create a Space</button>} /> : null}
@@ -243,7 +258,7 @@ export function SpacesPage() {
                 {(previewQueries[0].data?.items || []).length ? (previewQueries[0].data.items).slice(0, 3).map((product) => (
                   <div className="space-preview-expiry" key={product.id}>
                     <span>{product.productType} · {product.brand}</span>
-                    <time dateTime={product.expiresOn}>{product.expiresOn}</time>
+                    <time dateTime={product.expiresOn}>{formatDate(product.expiresOn)}</time>
                   </div>
                 )) : <p className="quiet-copy">No products in this Space yet.</p>}
               </Section>
@@ -261,12 +276,12 @@ export function SpacesPage() {
         <Sheet labelledBy="new-space-title" onClose={() => setShowCreate(false)}>
             <h2 id="new-space-title">Create a Space</h2>
             <p>Give a place or household its own set of product records.</p>
-            <form className="form-column" onSubmit={(event) => { event.preventDefault(); create.mutate(); }}>
-              <label className="field"><span>Name</span><input autoFocus maxLength={80} onChange={(event) => setName(event.target.value)} required value={name} /></label>
-              <label className="field"><span>Description <small>Optional</small></span><input maxLength={255} onChange={(event) => setDescription(event.target.value)} value={description} /></label>
+            <FormStack className="form-column" onSubmit={createForm.handleSubmit((values) => create.mutate(values), (invalid) => focusFirstErrorAfterRender(invalid, createFormRef.current))} ref={createFormRef}>
+              <Field autoFocus error={createErrors.name?.message} label="Name" maxLength={80} placeholder="e.g. Home" {...createForm.register('name')} />
+              <Field error={createErrors.description?.message} label="Description" maxLength={255} optional placeholder="e.g. Main home" {...createForm.register('description')} />
               <ErrorMessage error={create.error} />
-              <button className="button button-primary" disabled={!online || create.isPending || !name.trim()} type="submit">{create.isPending ? 'Creating…' : 'Create Space'}</button>
-            </form>
+              <button className="button button-primary" disabled={!online || create.isPending || !createForm.watch('name')?.trim()} type="submit">{create.isPending ? 'Creating…' : 'Create Space'}</button>
+            </FormStack>
             <button className="text-button" onClick={() => setShowCreate(false)} type="button">Cancel</button>
         </Sheet>
       ) : null}
@@ -277,12 +292,18 @@ export function SpacesPage() {
 /* Preflight: desktop=attention list and summary aside; mobile=stacked summary/list; empty=quiet attention and expired messages; loading=matching delayed skeletons; error=retry dashboard; success=server summaries and invitation notice; keyboard=links and actions; announcement=live route/toasts; offline=read cached view, disable add; restoration=server refresh on reconnect. */
 export function DashboardPage() {
   const online = useOnlineStatus();
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const spacesQuery = useQuery({
+    queryKey: ['spaces', user?.id],
+    queryFn: () => apiJson('/api/spaces')
+  });
   const dashboardQuery = useQuery({
-    queryKey: ['dashboard'],
+    queryKey: ['dashboard', user?.id],
     queryFn: () => apiJson('/api/dashboard')
   });
   const invitationsQuery = useQuery({
-    queryKey: ['invitations'],
+    queryKey: ['invitations', user?.id],
     queryFn: () => apiJson('/api/invitations')
   });
   const dashboard = dashboardQuery.data;
@@ -293,19 +314,42 @@ export function DashboardPage() {
   const later = upcoming.filter((product) => product.daysRemaining > thresholdDays);
   const expired = dashboard?.recentlyExpired || [];
   const invitations = invitationsQuery.data || [];
-  const contentLoading = dashboardQuery.isLoading;
-  const contentError = dashboardQuery.error || invitationsQuery.error;
+  const spaces = spacesQuery.data || [];
+  const hasAnyProducts = spaces.some((space) => space.productCount > 0);
+  const contentLoading = dashboardQuery.isLoading || spacesQuery.isLoading;
+  const contentError = dashboardQuery.error || spacesQuery.error;
+  const blockingError = (dashboardQuery.error && !dashboardQuery.data) || (spacesQuery.error && !spacesQuery.data);
   const addAction = <button className="button button-primary" disabled={!online} onClick={() => window.dispatchEvent(new CustomEvent('warrantyvault:open-add'))} type="button"><Plus aria-hidden="true" size={17} /> Add product</button>;
   return (
     <AppShell title="Overview" actions={addAction}>
       <div className="dashboard-layout">
         <Region as="section" className="dashboard-main">
-          <p className="section-intro">A clear view of the coverage you have in place.</p>
-          {contentError ? <ErrorMessage error={contentError} onRetry={() => dashboardQuery.refetch()} /> : null}
-          {contentLoading ? <DashboardSkeleton /> : (
+          {spaces.length ? <p className="section-intro">{(dashboard?.counts?.expiringSoon || 0) > 0
+            ? `${dashboard.counts.expiringSoon} ${dashboard.counts.expiringSoon === 1 ? 'warranty ends' : 'warranties end'} in the next ${thresholdDays} days.`
+            : dashboard?.counts?.active > 0
+              ? 'Nothing needs your attention right now.'
+              : 'All your recorded warranties have ended.'}</p> : null}
+          {contentError ? <ErrorMessage error={contentError} onRetry={() => Promise.all([dashboardQuery.refetch(), spacesQuery.refetch(), invitationsQuery.refetch()])} /> : null}
+          {blockingError ? null : contentLoading ? <DashboardSkeleton /> : (
             <>
-              {invitations.length ? <Link className="invitation-notice" to="/invitations">You have {invitations.length} invitation{invitations.length === 1 ? '' : 's'} waiting <ChevronRight aria-hidden="true" size={16} /></Link> : null}
-              <Section title="Needs attention">
+              {invitationsQuery.error ? <ErrorMessage error={invitationsQuery.error} onRetry={() => invitationsQuery.refetch()} /> : invitations.length ? <Link className="invitation-notice" to="/invitations">You have {invitations.length} invitation{invitations.length === 1 ? '' : 's'} waiting <ChevronRight aria-hidden="true" size={16} /></Link> : null}
+              {!spaces.length ? (
+                <section className="first-run">
+                  <ol>
+                    <li>Create a Space for a place, such as Home.</li>
+                    <li>Add a bill and its warranty period.</li>
+                    <li>We email you before the warranty ends.</li>
+                  </ol>
+                  <button className="button button-primary" disabled={!online} onClick={() => navigate('/spaces?create=1&add=1')} type="button">Create your first Space</button>
+                </section>
+              ) : !hasAnyProducts ? (
+                <section className="first-run">
+                  <p>Your Spaces are ready. Add a bill to start tracking warranty dates.</p>
+                  <button className="button button-primary" disabled={!online} onClick={() => window.dispatchEvent(new CustomEvent('warrantyvault:open-add'))} type="button">Add your first bill</button>
+                </section>
+              ) : null}
+              {spaces.length && hasAnyProducts ? <>
+                <Section title="Needs attention">
                 {withinSeven.length ? <ProductGroup title="Within 7 days" products={withinSeven} /> : null}
                 {withinThreshold.length ? <ProductGroup title={`Within ${thresholdDays} days`} products={withinThreshold} /> : null}
                 {later.length ? <ProductGroup title="Later" products={later} /> : null}
@@ -320,10 +364,11 @@ export function DashboardPage() {
               <Section title="Recently expired" className="recently-expired">
                 {expired.length ? <ProductGroup products={expired} quiet /> : <p className="quiet-copy">No recently expired warranties to review.</p>}
               </Section>
+              </> : null}
             </>
           )}
         </Region>
-        <aside className="dashboard-aside" aria-label="Warranty summary">
+        {!blockingError && spaces.length && hasAnyProducts ? <aside className="dashboard-aside" aria-label="Warranty summary">
           {contentLoading ? <Skeleton rows={4} className="dashboard-aside-skeleton" /> : (
           <>
           <div className="summary-figures">
@@ -334,13 +379,13 @@ export function DashboardPage() {
           <div className="covered-value">
             <h2>Covered value</h2>
             {Object.entries(dashboard?.totalCoveredValue || {}).length ? Object.entries(dashboard.totalCoveredValue).map(([currency, value]) => (
-              <p key={currency}><strong>{new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(Number(value))}</strong><span>{currency}</span></p>
+              <p key={currency}><strong>{formatCurrency(value, currency)}</strong><span>{currency}</span></p>
             )) : <p><span>No product values yet</span></p>}
           </div>
           <Link className="text-link" to="/settings">Change reminder timing <ArrowRight aria-hidden="true" size={15} /></Link>
           </>
           )}
-        </aside>
+        </aside> : null}
       </div>
     </AppShell>
   );
@@ -358,7 +403,7 @@ function ProductGroup({ title, products, quiet = false }) {
           </div>
           <div className="attention-expiry">
             <StatusMark status={product.status}>{product.daysRemaining < 0 ? `${Math.abs(product.daysRemaining)} days ago` : `${product.daysRemaining} days left`}</StatusMark>
-            <time dateTime={product.expiresOn}>{product.expiresOn}</time>
+            <time dateTime={product.expiresOn}>{formatDate(product.expiresOn)}</time>
           </div>
           <Link aria-label={`Open ${product.productType} in ${product.spaceName}`} className="row-open" to={`/spaces/${product.spaceId}/products/${product.id}`}><ChevronRight aria-hidden="true" size={17} /></Link>
         </ListRow>
@@ -372,19 +417,20 @@ export function ProductReaderPage() {
   const { spaceId, productId } = useParams();
   const navigate = useNavigate();
   const queryClientRef = useQueryClient();
+  const { user } = useAuth();
   const online = useOnlineStatus();
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [factsOpen, setFactsOpen] = useState(false);
   const productQuery = useQuery({
-    queryKey: ['product', productId],
+    queryKey: ['product', user?.id, productId],
     queryFn: () => apiJson(`/api/products/${productId}`)
   });
   const product = productQuery.data;
   const deleteProduct = useMutation({
     mutationFn: () => apiJson(`/api/products/${productId}`, { method: 'DELETE' }),
     onSuccess: () => {
-      queryClientRef.invalidateQueries({ queryKey: ['products', spaceId] });
-      queryClientRef.invalidateQueries({ queryKey: ['space', spaceId] });
+      queryClientRef.removeQueries({ queryKey: ['product', user?.id, productId] });
+      invalidateAfterProductChange(queryClientRef, user.id, spaceId, productId);
       toast.success('Product deleted');
       navigate(`/spaces/${spaceId}`, { replace: true });
     }
@@ -407,7 +453,7 @@ export function ProductReaderPage() {
           <section className="product-reader-main">
             <div className="reader-status">
               <StatusMark status={product.status}>{product.status.replaceAll('_', ' ').toLowerCase()}</StatusMark>
-              <span>{product.daysRemaining < 0 ? `Expired ${Math.abs(product.daysRemaining)} days ago` : `Ends ${new Intl.DateTimeFormat(undefined, { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' }).format(new Date(`${product.expiresOn}T00:00:00Z`))}, in ${product.daysRemaining} days`}</span>
+              <span>{product.daysRemaining < 0 ? `Expired ${Math.abs(product.daysRemaining)} days ago` : `Ends ${formatDate(product.expiresOn)}, in ${product.daysRemaining} days`}</span>
             </div>
             <WarrantyLine purchasedOn={product.purchasedOn} expiresOn={product.expiresOn} progress={progress} status={product.status} />
             <Section title="Purchase bill">
@@ -458,10 +504,10 @@ export function ProductReaderPage() {
 function ProductFacts({ product }) {
   return (
     <KeyValue rows={[
-      { label: 'Purchased on', value: product.purchasedOn },
+      { label: 'Purchased on', value: formatDate(product.purchasedOn) },
       { label: 'Warranty period', value: `${product.warrantyMonths} ${product.warrantyMonths === 1 ? 'month' : 'months'}` },
-      { label: 'Expires on', value: product.expiresOn },
-      { label: 'Purchase price', value: `${product.purchasePrice} ${product.currency}` },
+      { label: 'Expires on', value: formatDate(product.expiresOn) },
+      { label: 'Purchase price', value: formatCurrency(product.purchasePrice, product.currency) },
       { label: 'Model', value: product.modelName },
       { label: 'Serial number', value: product.serialNumber },
       { label: 'Added by', value: product.createdBy?.name },
@@ -479,16 +525,18 @@ export function SpacePage() {
   const { spaceId } = useParams();
   const navigate = useNavigate();
   const queryClientRef = useQueryClient();
+  const { user } = useAuth();
   const online = useOnlineStatus();
   const [filters, setFilters] = useState({ q: '', status: '', sort: 'expiry' });
+  const [searchDraft, setSearchDraft] = useState('');
   const [selectedProductId, setSelectedProductId] = useState('');
   const [summaryOpen, setSummaryOpen] = useState(false);
   const spaceQuery = useQuery({
-    queryKey: ['space', spaceId],
+    queryKey: ['space', user?.id, spaceId],
     queryFn: () => apiJson(`/api/spaces/${spaceId}`)
   });
   const productsQuery = useInfiniteQuery({
-    queryKey: ['products', spaceId, filters],
+    queryKey: ['products', user?.id, spaceId, filters],
     queryFn: ({ pageParam }) => {
       const params = new URLSearchParams({ size: '50', page: String(pageParam), sort: filters.sort });
       if (filters.q.trim()) params.set('q', filters.q.trim());
@@ -496,35 +544,52 @@ export function SpacePage() {
       return apiJson(`/api/spaces/${spaceId}/products?${params}`);
     },
     enabled: Boolean(spaceQuery.data),
+    placeholderData: keepPreviousData,
     initialPageParam: 0,
     getNextPageParam: (lastPage) => lastPage.page + 1 < lastPage.totalPages ? lastPage.page + 1 : undefined
   });
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setFilters((current) => current.q === searchDraft ? current : { ...current, q: searchDraft });
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [searchDraft]);
   const [showSpaceSettings, setShowSpaceSettings] = useState(false);
   const [confirmDeleteSpace, setConfirmDeleteSpace] = useState(false);
-  const [spaceDetails, setSpaceDetails] = useState({ name: '', description: '' });
+  const spaceFormRef = useRef(null);
+  const spaceForm = useForm({
+    resolver: zodResolver(spaceSchema),
+    defaultValues: { name: '', description: '' }
+  });
+  const resetSpaceForm = spaceForm.reset;
+  const spaceFormErrors = spaceForm.formState.errors;
   const saveSpace = useMutation({
-    mutationFn: () => apiJson(`/api/spaces/${spaceId}`, {
+    mutationFn: (values) => apiJson(`/api/spaces/${spaceId}`, {
       method: 'PATCH',
-      body: JSON.stringify({ name: spaceDetails.name, description: spaceDetails.description })
+      body: JSON.stringify({ name: values.name, description: values.description || null })
     }),
     onSuccess: (space) => {
-      queryClientRef.setQueryData(['space', spaceId], space);
-      queryClientRef.invalidateQueries({ queryKey: ['spaces'] });
-      setSpaceDetails({ name: space.name, description: space.description || '' });
+      queryClientRef.setQueryData(['space', user.id, spaceId], space);
+      queryClientRef.invalidateQueries({ queryKey: ['spaces', user.id] });
+      spaceForm.reset({ name: space.name, description: space.description || '' });
       toast.success('Space updated');
+    },
+    onError: (requestError) => {
+      const invalidFields = mapServerFieldErrors(requestError.fieldErrors, spaceForm.setError);
+      if (invalidFields.length) focusFieldAfterRender(invalidFields[0], spaceFormRef.current);
     }
   });
   const deleteSpace = useMutation({
     mutationFn: () => apiJson(`/api/spaces/${spaceId}`, { method: 'DELETE' }),
     onSuccess: () => {
-      queryClientRef.invalidateQueries({ queryKey: ['spaces'] });
+      queryClientRef.invalidateQueries({ queryKey: ['spaces', user.id] });
       toast.success('Space deleted');
       navigate('/spaces', { replace: true });
     }
   });
   useEffect(() => {
-    if (spaceQuery.data) setSpaceDetails({ name: spaceQuery.data.name, description: spaceQuery.data.description || '' });
-  }, [spaceQuery.data]);
+    if (spaceQuery.data) resetSpaceForm({ name: spaceQuery.data.name, description: spaceQuery.data.description || '' });
+  }, [spaceQuery.data, resetSpaceForm]);
   const products = (productsQuery.data?.pages || []).flatMap((page) => page.items);
   const selectedProduct = products.find((product) => product.id === selectedProductId) || products[0];
   const title = spaceQuery.data?.name || 'Space';
@@ -550,9 +615,9 @@ export function SpacePage() {
             </div>
           </div>
           <ErrorMessage error={productsQuery.error} onRetry={() => productsQuery.refetch()} />
-          {!productsQuery.isLoading && productsQuery.data?.pages?.[0]?.totalItems > 0 ? (
+          {spaceQuery.data.productCount > 0 ? (
           <div className="product-filters">
-            <label className="field"><span>Search products</span><input onChange={(event) => setFilters((current) => ({ ...current, q: event.target.value }))} placeholder="Product type, brand, model…" value={filters.q} /></label>
+            <label className="field"><span>Search products</span><input onChange={(event) => setSearchDraft(event.target.value)} placeholder="e.g. dishwasher" value={searchDraft} /></label>
             <div className="status-filters" role="group" aria-label="Filter by warranty status">
               {[
                 ['', 'All'],
@@ -564,10 +629,17 @@ export function SpacePage() {
             <label className="field"><span>Sort</span><select onChange={(event) => setFilters((current) => ({ ...current, sort: event.target.value }))} value={filters.sort}><option value="expiry">Soonest expiry</option><option value="purchased">Recently purchased</option><option value="name">Product name</option></select></label>
           </div>
         ) : null}
-          {productsQuery.isLoading ? <Skeleton rows={6} /> : productsQuery.error ? null : (
-          <div className="line-list">
+          {productsQuery.isLoading && !productsQuery.data ? <Skeleton rows={6} /> : productsQuery.error ? null : (
+          <div aria-busy={productsQuery.isFetching} className={`line-list${productsQuery.isFetching ? ' list-refreshing' : ''}`}>
             {products.map((product, index) => <ProductRow index={index} key={product.id} product={product} selected={product.id === selectedProduct?.id} onSelect={() => setSelectedProductId(product.id)} />)}
-            {productsQuery.data?.pages?.[0]?.totalItems === 0 ? <EmptyState title={filters.q || filters.status ? 'No products match these filters.' : 'This Space has no products yet.'} detail="Product records keep purchase bills and coverage dates together." action={spaceQuery.data.permissions?.canCreateProducts ? <button className="text-button" disabled={!online} onClick={addProduct} type="button">Add a product</button> : null} /> : null}
+            {productsQuery.data?.pages?.[0]?.totalItems === 0 ? (
+              filters.q || filters.status ? (
+                <div className="empty-state">
+                  <p>No products match these filters.</p>
+                  <button className="text-button" onClick={() => { setSearchDraft(''); setFilters({ q: '', status: '', sort: filters.sort }); }} type="button">Clear filters</button>
+                </div>
+              ) : <EmptyState title="This Space has no products yet." detail="Product records keep purchase bills and coverage dates together." action={spaceQuery.data.permissions?.canCreateProducts ? <button className="text-button" disabled={!online} onClick={addProduct} type="button">Add a product</button> : null} />
+            ) : null}
           </div>
         )}
           {selectedProduct ? <button className="text-button facts-mobile" onClick={() => setSummaryOpen(true)} type="button">Selected: {selectedProduct.productType} · product details</button> : null}
@@ -592,7 +664,7 @@ export function SpacePage() {
                 { label: 'Role', value: spaceQuery.data.myRole?.toLowerCase() },
                 { label: 'People', value: spaceQuery.data.memberCount },
                 { label: 'Products', value: spaceQuery.data.productCount },
-                { label: 'Next expiry', value: spaceQuery.data.nextExpiry?.expiresOn || 'No products yet' }
+                { label: 'Next expiry', value: spaceQuery.data.nextExpiry ? formatDate(spaceQuery.data.nextExpiry.expiresOn) : 'No products yet' }
               ]} />
             </>
           )}
@@ -605,8 +677,8 @@ export function SpacePage() {
           <WarrantyLine purchasedOn={selectedProduct.purchasedOn} expiresOn={selectedProduct.expiresOn} progress={selectedProduct.warrantyElapsedFraction} status={selectedProduct.status} />
           <KeyValue rows={[
             { label: 'Role', value: spaceQuery.data.myRole?.toLowerCase() },
-            { label: 'Purchased', value: selectedProduct.purchasedOn },
-            { label: 'Expires', value: selectedProduct.expiresOn },
+            { label: 'Purchased', value: formatDate(selectedProduct.purchasedOn) },
+            { label: 'Expires', value: formatDate(selectedProduct.expiresOn) },
             { label: 'Warranty', value: `${selectedProduct.warrantyMonths} months` }
           ]} />
           <div className="reader-actions">
@@ -618,12 +690,12 @@ export function SpacePage() {
       {showSpaceSettings && spaceQuery.data.permissions?.canEdit ? (
         <Sheet labelledBy="space-settings-title" onClose={() => setShowSpaceSettings(false)}>
           <h2 id="space-settings-title">Space settings</h2>
-          <form className="form-column" onSubmit={(event) => { event.preventDefault(); saveSpace.mutate(); }}>
-            <label className="field"><span>Name</span><input maxLength={80} onChange={(event) => setSpaceDetails((current) => ({ ...current, name: event.target.value }))} required value={spaceDetails.name} /></label>
-            <label className="field"><span>Description <small>Optional</small></span><input maxLength={255} onChange={(event) => setSpaceDetails((current) => ({ ...current, description: event.target.value }))} value={spaceDetails.description} /></label>
+          <FormStack className="form-column" onSubmit={spaceForm.handleSubmit((values) => saveSpace.mutate(values), (invalid) => focusFirstErrorAfterRender(invalid, spaceFormRef.current))} ref={spaceFormRef}>
+            <Field autoFocus error={spaceFormErrors.name?.message} label="Name" maxLength={80} placeholder="e.g. Home" {...spaceForm.register('name')} />
+            <Field error={spaceFormErrors.description?.message} label="Description" maxLength={255} optional placeholder="e.g. Main home" {...spaceForm.register('description')} />
             <ErrorMessage error={saveSpace.error} />
             <button className="button button-primary" disabled={!online || saveSpace.isPending} type="submit">{saveSpace.isPending ? 'Saving…' : 'Save Space'}</button>
-          </form>
+          </FormStack>
           {spaceQuery.data.permissions?.canDelete ? <button className="text-button remove-link" disabled={!online || deleteSpace.isPending} onClick={() => { setShowSpaceSettings(false); setConfirmDeleteSpace(true); }} type="button">Delete Space and its products</button> : null}
         </Sheet>
       ) : null}
@@ -651,26 +723,43 @@ export function SpaceMembersPage() {
   const { user } = useAuth();
   const online = useOnlineStatus();
   const spaceQuery = useQuery({
-    queryKey: ['space', spaceId],
+    queryKey: ['space', user?.id, spaceId],
     queryFn: () => apiJson(`/api/spaces/${spaceId}`)
   });
   const membersQuery = useQuery({
-    queryKey: ['members', spaceId],
+    queryKey: ['members', user?.id, spaceId],
     queryFn: () => apiJson(`/api/spaces/${spaceId}/members`)
   });
-  const [email, setEmail] = useState('');
-  const [role, setRole] = useState('VIEWER');
+  const inviteFormRef = useRef(null);
+  const inviteForm = useForm({
+    resolver: zodResolver(inviteSchema),
+    defaultValues: { email: '', role: 'VIEWER' },
+    mode: 'onBlur'
+  });
+  const inviteErrors = inviteForm.formState.errors;
   const [confirmMember, setConfirmMember] = useState(null);
-  const invalidate = () => queryClientRef.invalidateQueries({ queryKey: ['members', spaceId] });
+  const invalidate = () => {
+    queryClientRef.invalidateQueries({ queryKey: ['members', user?.id, spaceId] });
+    queryClientRef.invalidateQueries({ queryKey: ['space', user?.id, spaceId] });
+    queryClientRef.invalidateQueries({ queryKey: ['spaces', user?.id] });
+    queryClientRef.invalidateQueries({ queryKey: ['invitations', user?.id] });
+    queryClientRef.invalidateQueries({ queryKey: ['space-preview-members', user?.id, spaceId] });
+  };
   const invite = useMutation({
-    mutationFn: () => apiJson(`/api/spaces/${spaceId}/invitations`, {
+    mutationFn: (values) => apiJson(`/api/spaces/${spaceId}/invitations`, {
       method: 'POST',
-      body: JSON.stringify({ email, role })
+      body: JSON.stringify(values)
     }),
-    onSuccess: () => {
-      setEmail('');
-      toast.success('Invitation sent');
+    onSuccess: (invitation) => {
+      inviteForm.reset({ email: '', role: 'VIEWER' });
+      toast.success(invitation.emailSent === false
+        ? 'Invitation saved, but the email could not be sent.'
+        : 'Invitation sent');
       invalidate();
+    },
+    onError: (requestError) => {
+      const invalidFields = mapServerFieldErrors(requestError.fieldErrors, inviteForm.setError);
+      if (invalidFields.length) focusFieldAfterRender(invalidFields[0], inviteFormRef.current);
     }
   });
   const revoke = useMutation({
@@ -689,7 +778,7 @@ export function SpaceMembersPage() {
     onSuccess: (_, removedUserId) => {
       setConfirmMember(null);
       if (removedUserId === user?.id) {
-        queryClientRef.invalidateQueries({ queryKey: ['spaces'] });
+        queryClientRef.invalidateQueries({ queryKey: ['spaces', user?.id] });
         toast.success('You left the Space');
         navigate('/spaces', { replace: true });
       } else {
@@ -703,7 +792,7 @@ export function SpaceMembersPage() {
     <AppShell title={`${spaceQuery.data?.name || 'Space'} members`}>
       <section className="content-column">
         <p className="section-intro">People only see Spaces shared with them. Editors can update products; viewers can read records.</p>
-        <ErrorMessage error={spaceQuery.error || membersQuery.error || invite.error || revoke.error || changeRole.error || removeMember.error} onRetry={() => { spaceQuery.refetch(); membersQuery.refetch(); }} />
+        <ErrorMessage error={spaceQuery.error || membersQuery.error || revoke.error || changeRole.error || removeMember.error} onRetry={() => { spaceQuery.refetch(); membersQuery.refetch(); }} />
         {membersQuery.isLoading ? <Skeleton rows={5} /> : (
           <>
             <div className="line-list">
@@ -733,26 +822,24 @@ export function SpaceMembersPage() {
             </div>
             {owner ? (
               <>
-                <form className="inline-form" onSubmit={(event) => { event.preventDefault(); invite.mutate(); }}>
+                <FormStack className="invite-form" onSubmit={inviteForm.handleSubmit((values) => invite.mutate(values), (invalid) => focusFirstErrorAfterRender(invalid, inviteFormRef.current))} ref={inviteFormRef}>
                   <h2>Invite someone</h2>
-                  <label className="field"><span>Email address</span><input autoComplete="email" onChange={(event) => setEmail(event.target.value)} required type="email" value={email} /></label>
-                  <label className="field">
-                    <span>Access</span>
-                    <select disabled={!online} onChange={(event) => setRole(event.target.value)} value={role}>
-                      <option value="VIEWER">Viewer — can view products and documents</option>
-                      <option value="EDITOR">Editor — can add and edit products</option>
-                    </select>
-                  </label>
+                  <Field autoComplete="email" error={inviteErrors.email?.message} label="Email address" placeholder="e.g. name@example.com" type="email" {...inviteForm.register('email')} />
+                  <Field as="select" error={inviteErrors.role?.message} label="Access" {...inviteForm.register('role')} disabled={!online}>
+                    <option value="VIEWER">Viewer: can view products and documents</option>
+                    <option value="EDITOR">Editor: can add and edit products</option>
+                  </Field>
                   <p className="invite-role-help">Viewers can see everything. Editors can add and edit products, but cannot delete them or manage people.</p>
+                  <ErrorMessage error={invite.error} />
                   <button className="button button-primary" disabled={!online || invite.isPending} type="submit">{invite.isPending ? 'Sending…' : 'Send invitation'}</button>
                   {!online ? <p className="offline-note" role="status">Connect to send invitations or update membership.</p> : null}
-                </form>
+                </FormStack>
                 {(membersQuery.data?.invitations || []).length ? (
                   <div className="pending-invitations">
                     <h2>Pending invitations</h2>
                     {(membersQuery.data.invitations).map((invitation) => (
                       <div className="line-item invitation-row" key={invitation.id}>
-                        <span><strong>{invitation.email}</strong><small>{invitation.role.toLowerCase()} · expires {new Date(invitation.expiresAt).toLocaleDateString()}</small></span>
+                        <span><strong>{invitation.email}</strong><small>{invitation.role.toLowerCase()} · expires {formatDateTime(invitation.expiresAt)}</small></span>
                         <button className="text-button remove-link" disabled={!online || revoke.isPending} onClick={() => revoke.mutate(invitation.id)} type="button">Revoke</button>
                       </div>
                     ))}
@@ -784,15 +871,16 @@ export function SpaceMembersPage() {
 export function InvitationsPage() {
   const queryClientRef = useQueryClient();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const invitationsQuery = useQuery({
-    queryKey: ['invitations'],
+    queryKey: ['invitations', user?.id],
     queryFn: () => apiJson('/api/invitations')
   });
   const respond = useMutation({
     mutationFn: ({ invitationId, action }) => apiJson(`/api/invitations/${invitationId}/${action}`, { method: 'POST', body: '{}' }),
     onSuccess: (result, variables) => {
-      queryClientRef.invalidateQueries({ queryKey: ['invitations'] });
-      queryClientRef.invalidateQueries({ queryKey: ['spaces'] });
+      queryClientRef.invalidateQueries({ queryKey: ['invitations', user.id] });
+      queryClientRef.invalidateQueries({ queryKey: ['spaces', user.id] });
       if (variables.action === 'accept') {
         toast.success('You joined the Space');
         navigate(`/spaces/${result.id}`);
@@ -811,7 +899,7 @@ export function InvitationsPage() {
               <article className="line-item invitation-row" key={invitation.id}>
                 <span>
                   <strong>{invitation.spaceName}</strong>
-                  <small>{invitation.invitedByName} invited you as {invitation.role.toLowerCase()} · expires {new Date(invitation.expiresAt).toLocaleDateString()}</small>
+                  <small>{invitation.invitedByName} invited you as {invitation.role.toLowerCase()} · expires {formatDateTime(invitation.expiresAt)}</small>
                 </span>
                 <span className="member-actions">
                   <button className="text-button" disabled={respond.isPending} onClick={() => respond.mutate({ invitationId: invitation.id, action: 'decline' })} type="button">Decline</button>
@@ -833,11 +921,11 @@ function ProductRow({ product, selected, onSelect, index }) {
       <button className="product-select" aria-pressed={selected} onClick={onSelect} type="button">
         <strong>{product.productType} <span className="muted">·</span> {product.brand}</strong>
         {product.modelName ? <small>{product.modelName}</small> : null}
-        <small>{product.purchasePrice} {product.currency} · purchased {product.purchasedOn}</small>
+        <small>{formatCurrency(product.purchasePrice, product.currency)} · purchased {formatDate(product.purchasedOn)}</small>
       </button>
       <div className="product-expiry">
         <StatusMark status={product.status} />
-        <time dateTime={product.expiresOn}>{product.expiresOn}</time>
+        <time dateTime={product.expiresOn}>{formatDate(product.expiresOn)}</time>
         <Link className="text-button" to={`/spaces/${product.spaceId}/products/${product.id}`}>Open</Link>
       </div>
     </ListRow>
@@ -894,27 +982,39 @@ function SuggestionUndo({ onUndo }) {
   );
 }
 
-function ProductForm({ spaceId, productId, onSaved }) {
+export function ProductForm({ spaceId, productId, onSaved }) {
+  const queryClientRef = useQueryClient();
   const { user } = useAuth();
   const online = useOnlineStatus();
   const productQuery = useQuery({
-    queryKey: ['product', productId],
+    queryKey: ['product', user?.id, productId],
     queryFn: () => apiJson(`/api/products/${productId}`),
     enabled: Boolean(productId)
   });
   const facetsQuery = useQuery({
-    queryKey: ['product-facets'],
+    queryKey: ['product-facets', user?.id],
     queryFn: () => apiJson('/api/products/facets')
   });
   const facets = facetsQuery.data;
-  const [values, setValues] = useState({
-    productType: '', brand: '', purchasedOn: '', warrantyMonths: '', purchasePrice: '',
-    currency: user?.currency || 'INR', modelName: '', serialNumber: '', notes: ''
+  const formRef = useRef(null);
+  const form = useForm({
+    resolver: zodResolver(productSchema),
+    defaultValues: {
+      productType: '', brand: '', purchasedOn: '', warrantyMonths: '', purchasePrice: '',
+      currency: user?.currency || 'INR', modelName: '', serialNumber: '', notes: ''
+    },
+    mode: 'onBlur'
   });
+  const resetProductForm = form.reset;
+  const getProductValues = form.getValues;
+  const values = form.watch();
+  const formErrors = form.formState.errors;
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
   const [billFile, setBillFile] = useState(null);
   const [cardFile, setCardFile] = useState(null);
+  const [billFileError, setBillFileError] = useState('');
+  const [cardFileError, setCardFileError] = useState('');
   const [removeWarrantyCard, setRemoveWarrantyCard] = useState(false);
   const [suggestions, setSuggestions] = useState({});
   const [previousValues, setPreviousValues] = useState({});
@@ -923,9 +1023,8 @@ function ProductForm({ spaceId, productId, onSaved }) {
   const [ocrStatus, setOcrStatus] = useState('idle');
   const [ocrProgress, setOcrProgress] = useState(0);
   const [ocrError, setOcrError] = useState('');
-  const [fieldErrors, setFieldErrors] = useState({});
   const [dirty, setDirty] = useState(false);
-  const valuesRef = useRef(values);
+  const valuesRef = useRef(getProductValues());
   const touchedFields = useRef(new Set());
   const ocrTask = useRef(null);
   const ocrRequest = useRef(0);
@@ -948,10 +1047,15 @@ function ProductForm({ spaceId, productId, onSaved }) {
       notes: product.notes || ''
     };
     valuesRef.current = next;
-    setValues(next);
+    resetProductForm(next);
     setRemoveWarrantyCard(false);
     setDirty(false);
-  }, [productQuery.data]);
+    setBillFile(null);
+    setCardFile(null);
+    setSuggestions({});
+    setPreviousValues({});
+    setCustomWarranty(![6, 12, 24, 36, 60].includes(Number(next.warrantyMonths)));
+  }, [productQuery.data, resetProductForm]);
 
   useEffect(() => {
     if (!dirty) return undefined;
@@ -983,8 +1087,9 @@ function ProductForm({ spaceId, productId, onSaved }) {
     touchedFields.current.add(name);
     const next = { ...valuesRef.current, [name]: value };
     valuesRef.current = next;
-    setValues(next);
     setDirty(true);
+    setError(null);
+    form.clearErrors(name);
     setSuggestions((current) => {
       if (!current[name]) return current;
       const updated = { ...current };
@@ -1014,7 +1119,8 @@ function ProductForm({ spaceId, productId, onSaved }) {
     }
     if (Object.keys(suggested).length) {
       valuesRef.current = next;
-      setValues(next);
+      for (const field of Object.keys(suggested)) form.setValue(field, next[field], { shouldDirty: true, shouldValidate: true });
+      if (suggested.warrantyMonths && ![6, 12, 24, 36, 60].includes(Number(next.warrantyMonths))) setCustomWarranty(true);
       setPreviousValues((current) => ({ ...current, ...oldValues }));
       setSuggestions((current) => ({ ...current, ...suggested }));
     }
@@ -1023,8 +1129,9 @@ function ProductForm({ spaceId, productId, onSaved }) {
   const undoSuggestion = (field) => {
     const next = { ...valuesRef.current, [field]: previousValues[field] || '' };
     valuesRef.current = next;
-    setValues(next);
+    form.setValue(field, next[field], { shouldDirty: true, shouldValidate: true });
     touchedFields.current.add(field);
+    form.clearErrors(field);
     setSuggestions((current) => {
       const updated = { ...current };
       delete updated[field];
@@ -1032,18 +1139,22 @@ function ProductForm({ spaceId, productId, onSaved }) {
     });
   };
 
-  const prepareBill = async (event) => {
-    const selected = event.target.files?.[0];
+  const prepareBill = async (selectedFile) => {
+    ocrTask.current?.cancel();
+    ocrTask.current = null;
+    const requestId = ++ocrRequest.current;
     setBillFile(null);
     setRawOcr('');
     setOcrError('');
-    if (!selected) return;
+    setBillFileError('');
+    setOcrStatus('idle');
+    setOcrProgress(0);
     setError(null);
-    setDirty(true);
-    const requestId = ++ocrRequest.current;
     try {
-      const prepared = await prepareImage(selected);
+      const prepared = await prepareImage(selectedFile);
+      if (!prepared) return;
       if (requestId !== ocrRequest.current) return;
+      setDirty(true);
       setBillFile(prepared);
       setOcrStatus('reading');
       setOcrProgress(0);
@@ -1065,21 +1176,23 @@ function ProductForm({ spaceId, productId, onSaved }) {
     } catch (ocrFailure) {
       if (requestId !== ocrRequest.current) return;
       ocrTask.current = null;
-      setOcrStatus('failed');
-      setOcrError(ocrFailure.message || 'Bill reading was unavailable. You can still save the product.');
+      setOcrStatus('idle');
+      setBillFileError(ocrFailure.message || 'Choose a JPEG, PNG, or WebP image.');
     }
   };
 
-  const prepareCard = async (event) => {
-    const selected = event.target.files?.[0];
+  const prepareCard = async (selectedFile) => {
     setCardFile(null);
-    if (!selected) return;
+    setCardFileError('');
     try {
-      setCardFile(await prepareImage(selected));
+      const prepared = await prepareImage(selectedFile);
+      if (!prepared) return;
+      setCardFile(prepared);
+      setRemoveWarrantyCard(false);
       setDirty(true);
       setError(null);
     } catch (imageFailure) {
-      setError(imageFailure);
+      setCardFileError(imageFailure.message || 'Choose a JPEG, PNG, or WebP image.');
     }
   };
 
@@ -1108,13 +1221,26 @@ function ProductForm({ spaceId, productId, onSaved }) {
   const pickWarranty = (months) => {
     const next = { ...valuesRef.current, warrantyMonths: String(months) };
     valuesRef.current = next;
-    setValues(next);
+    form.setValue('warrantyMonths', String(months), { shouldDirty: true, shouldValidate: true });
     setDirty(true);
     touchedFields.current.add('warrantyMonths');
+    form.clearErrors('warrantyMonths');
+    setError(null);
   };
+  const registerField = (name) => form.register(name, { onChange: changeField });
+  const priceFieldRegistration = registerField('purchasePrice');
+  const updateField = (name, value) => {
+    const next = { ...valuesRef.current, [name]: value };
+    valuesRef.current = next;
+    form.setValue(name, value, { shouldDirty: true, shouldValidate: true });
+    touchedFields.current.add(name);
+    setDirty(true);
+    setError(null);
+    form.clearErrors(name);
+  };
+  const [customWarranty, setCustomWarranty] = useState(false);
 
-  const submit = async (event) => {
-    event.preventDefault();
+  const submit = async (validatedValues) => {
     setBusy(true);
     setError(null);
     if (!online) {
@@ -1123,20 +1249,22 @@ function ProductForm({ spaceId, productId, onSaved }) {
       return;
     }
     if (!productId && !billFile) {
+      setBillFileError('Choose a bill image to continue.');
       setError(new Error('Choose a bill image to continue.'));
+      focusFieldAfterRender('billPicker', formRef.current);
       setBusy(false);
       return;
     }
     const data = {
-      productType: values.productType,
-      brand: values.brand,
-      purchasedOn: values.purchasedOn,
-      warrantyMonths: Number(values.warrantyMonths),
-      purchasePrice: values.purchasePrice,
-      currency: values.currency,
-      modelName: values.modelName || null,
-      serialNumber: values.serialNumber || null,
-      notes: values.notes || null
+      productType: validatedValues.productType.trim(),
+      brand: validatedValues.brand.trim(),
+      purchasedOn: validatedValues.purchasedOn,
+      warrantyMonths: Number(validatedValues.warrantyMonths),
+      purchasePrice: normalizePrice(validatedValues.purchasePrice),
+      currency: validatedValues.currency,
+      modelName: validatedValues.modelName || null,
+      serialNumber: validatedValues.serialNumber || null,
+      notes: validatedValues.notes || null
     };
     if (productId) data.removeWarrantyCard = removeWarrantyCard;
     const payload = new FormData();
@@ -1148,14 +1276,16 @@ function ProductForm({ spaceId, productId, onSaved }) {
         method: productId ? 'PUT' : 'POST',
         body: payload
       });
+      queryClientRef.setQueryData(['product', user.id, savedProduct.id], savedProduct);
+      invalidateAfterProductChange(queryClientRef, user.id, spaceId, savedProduct.id);
       setDirty(false);
       toast.success(productId ? 'Product updated' : 'Product saved');
       onSaved(savedProduct);
     } catch (requestError) {
       setError(requestError);
-      setFieldErrors(requestError.fieldErrors || {});
-      const firstInvalidField = Object.keys(requestError.fieldErrors || {})[0];
-      if (firstInvalidField) document.querySelector(`[name="${firstInvalidField}"]`)?.focus();
+      const invalidFields = mapServerFieldErrors(requestError.fieldErrors, form.setError);
+      if (invalidFields.includes('warrantyMonths')) setCustomWarranty(true);
+      if (invalidFields.length) focusFieldAfterRender(invalidFields[0], formRef.current);
     } finally {
       setBusy(false);
     }
@@ -1166,36 +1296,104 @@ function ProductForm({ spaceId, productId, onSaved }) {
 
   return (
     <div className="product-form-layout">
-      <form className="product-form" onSubmit={submit}>
+      <FormStack className="product-form" onSubmit={form.handleSubmit(submit, (invalid) => focusFirstErrorAfterRender(invalid, formRef.current))} ref={formRef}>
         <h2>Product details</h2>
         {facetsQuery.error ? <p className="ocr-note" role="status">Saved product suggestions are unavailable. You can still enter any product type or brand.</p> : null}
         {!online ? <p className="offline-note" role="status">You’re offline. Product changes need a connection.</p> : null}
-        <div className="form-grid">
-          <label className="field full-width"><span>Purchase bill <small>{productId ? 'Optional · replace the current bill.' : 'Required · JPEG, PNG or WebP, up to 10 MB. Read locally to suggest details.'}</small></span><input accept="image/jpeg,image/png,image/webp" onChange={prepareBill} required={!productId} type="file" /></label>
-          <label className="field full-width"><span>Warranty card <small>Optional · add another document showing the coverage terms.</small></span><input accept="image/jpeg,image/png,image/webp" onChange={prepareCard} type="file" /></label>
-          <label className="field full-width"><span>Product type{suggestions.productType ? <SuggestionUndo onUndo={() => undoSuggestion('productType')} /> : null}</span><input aria-describedby={fieldErrors.productType ? 'product-type-error' : undefined} list="product-type-suggestions" name="productType" onChange={changeField} required maxLength={60} placeholder="Refrigerator" value={values.productType} /><datalist id="product-type-suggestions">{productTypeOptions.map((type) => <option key={type} value={type} />)}</datalist>{fieldErrors.productType ? <small className="form-error" id="product-type-error">{fieldErrors.productType}</small> : null}</label>
-          <label className="field full-width"><span>Brand{suggestions.brand ? <SuggestionUndo onUndo={() => undoSuggestion('brand')} /> : null}</span><input aria-describedby={fieldErrors.brand ? 'brand-error' : undefined} list="brand-suggestions" name="brand" onChange={changeField} required maxLength={60} placeholder="Brand" value={values.brand} /><datalist id="brand-suggestions">{brandOptions.map((brand) => <option key={brand} value={brand} />)}</datalist>{fieldErrors.brand ? <small className="form-error" id="brand-error">{fieldErrors.brand}</small> : null}</label>
-          <label className="field full-width"><span>Model <small>Optional</small>{suggestions.modelName ? <SuggestionUndo onUndo={() => undoSuggestion('modelName')} /> : null}</span><input name="modelName" onChange={changeField} maxLength={120} value={values.modelName} /></label>
-          <label className="field full-width"><span>Serial number <small>Optional</small>{suggestions.serialNumber ? <SuggestionUndo onUndo={() => undoSuggestion('serialNumber')} /> : null}</span><input name="serialNumber" onChange={changeField} maxLength={120} value={values.serialNumber} /></label>
-          <label className="field full-width"><span>Purchased on{suggestions.purchasedOn ? <SuggestionUndo onUndo={() => undoSuggestion('purchasedOn')} /> : null}</span><input name="purchasedOn" onChange={changeField} required type="date" value={values.purchasedOn} /></label>
-          <div className="field full-width"><label htmlFor="warranty-months">Warranty period{suggestions.warrantyMonths ? <SuggestionUndo onUndo={() => undoSuggestion('warrantyMonths')} /> : null}</label><input id="warranty-months" name="warrantyMonths" onChange={changeField} required type="number" min="1" max="120" value={values.warrantyMonths} /><div className="quick-picks" aria-label="Common warranty periods">{[6, 12, 24, 36, 60].map((months) => <button key={months} onClick={() => pickWarranty(months)} type="button">{months} months</button>)}</div>{expiresOn ? <p className="expiry-preview">Warranty ends <time dateTime={expiresOn}>{expiresOn}</time></p> : null}</div>
-          <label className="field full-width"><span>Purchase price{suggestions.purchasePrice ? <SuggestionUndo onUndo={() => undoSuggestion('purchasePrice')} /> : null}</span><div className="price-field"><input aria-label="Purchase price" name="purchasePrice" onChange={changeField} required inputMode="decimal" pattern="\\d+(\\.\\d{1,2})?" value={values.purchasePrice} /><select aria-label="Currency" name="currency" onChange={changeField} required value={values.currency}>{[...new Set([values.currency, 'INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'])].map((currency) => <option key={currency} value={currency}>{currency}</option>)}</select></div></label>
-          <label className="field full-width"><span>Notes <small>Optional</small></span><textarea name="notes" onChange={changeField} maxLength={1000} rows={3} value={values.notes} /></label>
-        </div>
-        {ocrStatus === 'reading' ? (
-          <div className="ocr-progress" aria-live="polite">
-            <label htmlFor="bill-reading-progress">Reading bill · {Math.round(ocrProgress * 100)}%</label>
-            <progress id="bill-reading-progress" max="1" value={ocrProgress} />
-            <button className="text-button" onClick={cancelOcr} type="button">Cancel reading</button>
+        <section className="product-form-section">
+          <h3>Bill</h3>
+          <ImagePicker
+            camera
+            current={Boolean(productId && !billFile)}
+            currentImageType="bill"
+            currentLabel="Current saved purchase bill"
+            currentProductId={productId}
+            currentSize={productQuery.data?.bill?.sizeBytes}
+            fieldName="bill"
+            file={billFile}
+            hint={productId ? 'Replace the current bill if you have a clearer copy.' : 'Required. JPEG, PNG, or WebP. Image processing and text recognition stay on this device.'}
+            label="Purchase bill"
+            optional={Boolean(productId)}
+            error={billFileError}
+            onSelect={prepareBill}
+            onRemove={() => { cancelOcr(); setOcrStatus('idle'); setBillFile(null); setBillPreview(''); setDirty(true); }}
+          />
+          {ocrStatus === 'reading' ? (
+            <div className="ocr-progress" aria-live="polite">
+              <label htmlFor="bill-reading-progress">Reading bill · {Math.round(ocrProgress * 100)}%</label>
+              <progress id="bill-reading-progress" max="1" value={ocrProgress} />
+              <button className="text-button" onClick={cancelOcr} type="button">Cancel reading</button>
+            </div>
+          ) : null}
+          {ocrError ? <p className="ocr-note" role="status">{ocrError}</p> : null}
+          {rawOcr ? <details className="ocr-found-text"><summary>Text found on the bill</summary><pre>{rawOcr}</pre></details> : null}
+        </section>
+        <section className="product-form-section">
+          <h3>Product</h3>
+          <div className="form-grid">
+            <div className="field full-width">
+              <Controller control={form.control} name="productType" render={({ field }) => <FreeTextCombobox error={formErrors.productType?.message} inputRef={field.ref} label="Product type" name={field.name} onBlur={field.onBlur} onChange={(event) => { changeField(event); field.onChange(event.target.value); }} options={productTypeOptions} placeholder="e.g. Refrigerator" value={field.value} />} />
+              {suggestions.productType ? <SuggestionUndo onUndo={() => undoSuggestion('productType')} /> : null}
+            </div>
+            <div className="field full-width">
+              <Controller control={form.control} name="brand" render={({ field }) => <FreeTextCombobox error={formErrors.brand?.message} inputRef={field.ref} label="Brand" name={field.name} onBlur={field.onBlur} onChange={(event) => { changeField(event); field.onChange(event.target.value); }} options={brandOptions} placeholder="e.g. LG" value={field.value} />} />
+              {suggestions.brand ? <SuggestionUndo onUndo={() => undoSuggestion('brand')} /> : null}
+            </div>
           </div>
-        ) : null}
-        {ocrError ? <p className="ocr-note" role="status">{ocrError}</p> : null}
-        {billFile && ocrStatus !== 'reading' && ocrStatus !== 'done' ? <button className="text-button ocr-skip" onClick={cancelOcr} type="button">Skip reading</button> : null}
-        {rawOcr ? <details className="ocr-found-text"><summary>Text found on the bill</summary><pre>{rawOcr}</pre></details> : null}
+        </section>
+        <section className="product-form-section">
+          <h3>Warranty</h3>
+          <Field error={formErrors.purchasedOn?.message} label="Purchased on">
+            {(props) => (
+              <>
+                <div className="date-control"><input {...props} {...registerField('purchasedOn')} max={localDateInputValue()} type="date" /><button className="text-button" onClick={() => updateField('purchasedOn', localDateInputValue())} type="button">Today</button></div>
+                {values.purchasedOn ? <small className="field-hint">Purchased {formatDate(values.purchasedOn)}</small> : null}
+              </>
+            )}
+          </Field>
+          <div className="field full-width">
+            <span className="field-label">Warranty period</span>
+            <div className="quick-picks" role="group" aria-label="Common warranty periods">
+              {[6, 12, 24, 36, 60].map((months, index) => <button aria-describedby={formErrors.warrantyMonths?.message ? 'warranty-period-error' : undefined} aria-invalid={Boolean(formErrors.warrantyMonths?.message)} aria-pressed={!customWarranty && Number(values.warrantyMonths) === months} key={months} name={index === 0 ? 'warrantyMonths' : undefined} onClick={() => { setCustomWarranty(false); pickWarranty(months); }} type="button">{months} months</button>)}
+              <button aria-pressed={customWarranty} onClick={() => { setCustomWarranty(true); updateField('warrantyMonths', ''); }} type="button">Other</button>
+            </div>
+            {customWarranty ? <Field error={formErrors.warrantyMonths?.message} label="Custom warranty in months" max="120" min="1" type="number" {...registerField('warrantyMonths')} /> : null}
+            {!customWarranty && formErrors.warrantyMonths?.message ? <small className="form-error" id="warranty-period-error" role="alert">{formErrors.warrantyMonths.message}</small> : null}
+            {expiresOn ? <p className="expiry-preview">Warranty ends <time dateTime={expiresOn}>{formatDate(expiresOn)}</time></p> : null}
+          </div>
+        </section>
+        <section className="product-form-section">
+          <h3>Price</h3>
+          <div className="field full-width">
+            <span className="field-label">Purchase price</span>
+            {suggestions.purchasePrice ? <SuggestionUndo onUndo={() => undoSuggestion('purchasePrice')} /> : null}
+            <div className="price-field">
+              <span className="currency-symbol" aria-hidden="true">{currencySymbol(values.currency || 'INR')}</span>
+              <input aria-describedby={formErrors.purchasePrice?.message ? 'purchase-price-error' : undefined} aria-invalid={Boolean(formErrors.purchasePrice?.message)} aria-label="Purchase price" inputMode="decimal" placeholder="e.g. 5,000.50" {...priceFieldRegistration} onBlur={(event) => {
+                  priceFieldRegistration.onBlur(event);
+                  const formatted = formatPriceInput(event.currentTarget.value);
+                  if (formatted !== event.currentTarget.value) updateField('purchasePrice', formatted);
+                }} />
+              <select aria-describedby={formErrors.currency?.message ? 'purchase-currency-error' : undefined} aria-invalid={Boolean(formErrors.currency?.message)} aria-label="Currency" {...registerField('currency')}>{[...new Set([values.currency || user?.currency || 'INR', 'INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'])].map((currency) => <option key={currency} value={currency}>{currency}</option>)}</select>
+            </div>
+            {values.purchasePrice && formErrors.purchasePrice == null ? <output className="price-preview" aria-live="polite">{formatCurrency(normalizePrice(values.purchasePrice), values.currency || 'INR')}</output> : null}
+            {formErrors.purchasePrice?.message ? <small className="form-error" id="purchase-price-error" role="alert">{formErrors.purchasePrice.message}</small> : null}
+            {formErrors.currency?.message ? <small className="form-error" id="purchase-currency-error" role="alert">{formErrors.currency.message}</small> : null}
+          </div>
+        </section>
+        <details className="product-more-details">
+          <summary>More details</summary>
+          <div className="product-form-section">
+            <ImagePicker camera current={Boolean(productQuery.data?.hasWarrantyCard && !removeWarrantyCard && !cardFile)} currentImageType="warranty-card" currentLabel="Current saved warranty card" currentProductId={productId} currentSize={productQuery.data?.warrantyCard?.sizeBytes} fieldName="warrantyCard" file={cardFile} hint="Add a second image showing the warranty terms." label="Warranty card" optional onSelect={prepareCard} onRemove={() => { setCardFile(null); setRemoveWarrantyCard(false); setDirty(true); }} />
+            {productId && productQuery.data?.hasWarrantyCard ? <SwitchControl checked={removeWarrantyCard} label="Remove current warranty card" onChange={(event) => { setRemoveWarrantyCard(event.target.checked); setDirty(true); }} /> : null}
+            <Field error={formErrors.modelName?.message} label="Model" maxLength={120} optional placeholder="e.g. RS-28" {...registerField('modelName')} />
+            <Field error={formErrors.serialNumber?.message} label="Serial number" maxLength={120} optional placeholder="e.g. ABC123456" {...registerField('serialNumber')} />
+            <Field as="textarea" error={formErrors.notes?.message} label="Notes" maxLength={1000} optional placeholder="e.g. Purchased for the kitchen" rows={3} {...registerField('notes')} />
+          </div>
+        </details>
         <ErrorMessage error={error} />
-        {productId && productQuery.data?.hasWarrantyCard ? <label className="reminder-toggle"><input checked={removeWarrantyCard} onChange={(event) => { setRemoveWarrantyCard(event.target.checked); setDirty(true); }} type="checkbox" /> Remove current warranty card</label> : null}
         <div className="product-save-bar"><button className="button button-primary" disabled={busy || !online} title={!online ? 'Connect to save product changes' : undefined} type="submit">{busy ? 'Saving…' : productId ? 'Save changes' : 'Save product'}</button></div>
-      </form>
+      </FormStack>
       <aside className="product-form-aside">
         {billPreview ? <figure className="bill-preview"><img alt="Preview of selected purchase bill" src={billPreview} /><figcaption>Purchase bill · processed on this device</figcaption></figure> : productId ? <PrivateImage productId={productId} imageType="bill" label={`Current purchase bill for ${productQuery.data?.brand || 'product'}`} /> : <p className="preview-empty">Your bill preview will appear here.</p>}
         {ocrStatus === 'reading' ? <p className="preview-status">Reading text · {Math.round(ocrProgress * 100)}%</p> : null}
@@ -1218,8 +1416,9 @@ function ProductForm({ spaceId, productId, onSaved }) {
 export function ProductFormPage({ editing = false }) {
   const { spaceId, productId } = useParams();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const { data: space, isLoading, error, refetch } = useQuery({
-    queryKey: ['space', spaceId],
+    queryKey: ['space', user?.id, spaceId],
     queryFn: () => apiJson(`/api/spaces/${spaceId}`)
   });
   const title = editing ? 'Edit product' : 'Add product';
@@ -1245,15 +1444,34 @@ export function SettingsPage() {
   const { user, updateUser, logout } = useAuth();
   const { preference: themePreference, changeTheme } = useTheme();
   const navigate = useNavigate();
-  const [profile, setProfile] = useState({
-    name: user?.name || '',
-    timezone: user?.timezone || 'UTC',
-    currency: user?.currency || 'INR'
+  const profileFormRef = useRef(null);
+  const passwordFormRef = useRef(null);
+  const profileForm = useForm({
+    resolver: zodResolver(profileSchema),
+    defaultValues: {
+      name: user?.name || '',
+      timezone: user?.timezone || 'UTC',
+      currency: user?.currency || 'INR'
+    }
   });
-  const [passwords, setPasswords] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
-  const [customDays, setCustomDays] = useState('');
+  const profileErrors = profileForm.formState.errors;
+  const passwordForm = useForm({
+    resolver: zodResolver(changePasswordSchema),
+    defaultValues: { currentPassword: '', newPassword: '', confirmPassword: '' }
+  });
+  const passwordErrors = passwordForm.formState.errors;
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [customDaysOpen, setCustomDaysOpen] = useState(false);
+  const customDaysFormRef = useRef(null);
+  const customDaysForm = useForm({
+    resolver: zodResolver(customReminderSchema),
+    defaultValues: { daysBefore: '' }
+  });
+  const customDaysError = customDaysForm.formState.errors.daysBefore?.message;
+  const [resetReminderRun, setResetReminderRun] = useState(false);
   const preferencesQuery = useQuery({
-    queryKey: ['notification-preferences'],
+    queryKey: ['notification-preferences', user?.id],
     queryFn: () => apiJson('/api/me/notification-preferences')
   });
   const preferences = preferencesQuery.data;
@@ -1267,43 +1485,60 @@ export function SettingsPage() {
       body: JSON.stringify(next)
     }),
     onSuccess: (next) => {
-      queryClientRef.setQueryData(['notification-preferences'], next);
-      setCustomDays('');
+      queryClientRef.setQueryData(['notification-preferences', user.id], next);
+      invalidateAfterPreferenceChange(queryClientRef, user.id);
+      setCustomDaysOpen(false);
       toast.success('Reminder preferences saved');
+    },
+    onError: (requestError) => {
+      const invalidFields = mapServerFieldErrors(requestError.fieldErrors, customDaysForm.setError);
+      if (invalidFields.length) focusFieldAfterRender(invalidFields[0], customDaysFormRef.current);
     }
   });
   const saveProfile = useMutation({
-    mutationFn: () => apiJson('/api/me', {
+    mutationFn: (profile) => apiJson('/api/me', {
       method: 'PATCH',
       body: JSON.stringify(profile)
     }),
     onSuccess: (updatedUser) => {
       updateUser(updatedUser);
+      profileForm.reset({
+        name: updatedUser.name || '',
+        timezone: updatedUser.timezone || 'UTC',
+        currency: updatedUser.currency || 'INR'
+      });
+      invalidateAfterPreferenceChange(queryClientRef, user.id);
       toast.success('Account details saved');
+    },
+    onError: (requestError) => {
+      const invalidFields = mapServerFieldErrors(requestError.fieldErrors, profileForm.setError);
+      if (invalidFields.length) focusFieldAfterRender(invalidFields[0], profileFormRef.current);
     }
   });
   const changePassword = useMutation({
-    mutationFn: () => apiJson('/api/me/password', {
+    mutationFn: (passwords) => apiJson('/api/me/password', {
       method: 'POST',
       body: JSON.stringify({
         currentPassword: passwords.currentPassword,
         newPassword: passwords.newPassword
       })
     }),
-    onSuccess: async () => {
-      toast.success('Password changed. Sign in again with your new password.');
-      try {
-        await logout();
-      } catch {
-        toast.error('Your password changed, but the old session could not be cleared at the server.');
-      } finally {
-        navigate('/login', { replace: true });
-      }
+    onSuccess: () => {
+      passwordForm.reset();
+      setChangePasswordOpen(false);
+      setPasswordVisible(false);
+      toast.success('Password changed');
+    },
+    onError: (requestError) => {
+      const invalidFields = mapServerFieldErrors(requestError.fieldErrors, passwordForm.setError);
+      if (invalidFields.length) focusFieldAfterRender(invalidFields[0], passwordFormRef.current);
     }
   });
   const runReminderCheck = useMutation({
-    mutationFn: () => apiJson('/api/dev/reminders/run', { method: 'POST' }),
-    onSuccess: (summary) => toast.success(`Reminder check finished: ${summary.productsReminded} product(s), ${summary.usersNotified} user(s)`)
+    mutationFn: () => apiJson(`/api/dev/reminders/run?reset=${resetReminderRun}`, { method: 'POST' }),
+    onSuccess: (summary) => toast.success(summary.productsReminded === 0
+      ? 'Nothing is due, or reminders were already sent. Tick Send again to repeat.'
+      : `Reminder check finished: ${summary.productsReminded} product(s), ${summary.usersNotified} user(s)`)
   });
   const online = useOnlineStatus();
   const signOut = async () => {
@@ -1318,26 +1553,21 @@ export function SettingsPage() {
   return (
     <AppShell title="Your account">
       <section className="content-column settings-content">
-        <ErrorMessage error={preferencesQuery.error || savePreferences.error || saveProfile.error || changePassword.error} onRetry={() => preferencesQuery.refetch()} />
+        <ErrorMessage error={preferencesQuery.error || savePreferences.error} onRetry={() => preferencesQuery.refetch()} />
         <section className="settings-section">
           <header className="section-heading"><h2>Profile</h2></header>
           <div className="settings-row"><span>Email</span><strong>{user?.email}</strong></div>
-        <form className="inline-form settings-form" onSubmit={(event) => { event.preventDefault(); saveProfile.mutate(); }}>
-          <label className="field"><span>Name</span><input autoComplete="name" maxLength={120} minLength={2} onChange={(event) => setProfile((current) => ({ ...current, name: event.target.value }))} required value={profile.name} /></label>
-          <label className="field">
-            <span>Timezone</span>
-            <select onChange={(event) => setProfile((current) => ({ ...current, timezone: event.target.value }))} value={profile.timezone}>
-              {[...new Set([profile.timezone, 'UTC', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Europe/Paris', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney'])].map((timezone) => <option key={timezone} value={timezone}>{timezone}</option>)}
-            </select>
-          </label>
-          <label className="field">
-            <span>Currency</span>
-            <select onChange={(event) => setProfile((current) => ({ ...current, currency: event.target.value }))} value={profile.currency}>
-              {[...new Set([profile.currency, 'INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'])].map((currency) => <option key={currency} value={currency}>{currency}</option>)}
-            </select>
-          </label>
-          <button className="button button-primary" disabled={!online || saveProfile.isPending} type="submit">{saveProfile.isPending ? 'Saving…' : 'Save account details'}</button>
-        </form>
+          <FormStack className="settings-form" onSubmit={profileForm.handleSubmit((profile) => saveProfile.mutate(profile), (invalid) => focusFirstErrorAfterRender(invalid, profileFormRef.current))} ref={profileFormRef}>
+            <Field autoComplete="name" error={profileErrors.name?.message} label="Name" maxLength={120} placeholder="e.g. Alex Morgan" {...profileForm.register('name')} />
+            <Field as="select" error={profileErrors.timezone?.message} label="Timezone" {...profileForm.register('timezone')}>
+              {[...new Set([user?.timezone || 'UTC', 'UTC', 'America/Los_Angeles', 'America/New_York', 'Europe/London', 'Europe/Paris', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney'])].map((timezone) => <option key={timezone} value={timezone}>{timezone}</option>)}
+            </Field>
+            <Field as="select" error={profileErrors.currency?.message} label="Currency" {...profileForm.register('currency')}>
+              {[...new Set([user?.currency || 'INR', 'INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'])].map((currency) => <option key={currency} value={currency}>{currency}</option>)}
+            </Field>
+            <ErrorMessage error={saveProfile.error} />
+            {profileForm.formState.isDirty ? <button className="button button-primary" disabled={!online || saveProfile.isPending} type="submit">{saveProfile.isPending ? 'Saving…' : 'Save account details'}</button> : null}
+          </FormStack>
         </section>
         <section className="settings-section">
           <header className="section-heading"><h2>Appearance</h2></header>
@@ -1350,39 +1580,35 @@ export function SettingsPage() {
         </section>
         <section className="settings-section">
           <header className="section-heading"><h2>Account</h2></header>
-        <form className="inline-form settings-form" onSubmit={(event) => {
-          event.preventDefault();
-          if (passwords.newPassword !== passwords.confirmPassword) {
-            changePassword.reset();
-            toast.error('The new passwords do not match');
-            return;
-          }
-          changePassword.mutate();
-        }}>
-          <h2>Change password</h2>
-          <label className="field"><span>Current password</span><input autoComplete="current-password" onChange={(event) => setPasswords((current) => ({ ...current, currentPassword: event.target.value }))} required type="password" value={passwords.currentPassword} /></label>
-          <label className="field"><span>New password <small>8–72 characters</small></span><input autoComplete="new-password" minLength={8} maxLength={72} onChange={(event) => setPasswords((current) => ({ ...current, newPassword: event.target.value }))} required type="password" value={passwords.newPassword} /></label>
-          <label className="field"><span>Confirm new password</span><input autoComplete="new-password" minLength={8} maxLength={72} onChange={(event) => setPasswords((current) => ({ ...current, confirmPassword: event.target.value }))} required type="password" value={passwords.confirmPassword} /></label>
-          <button className="button button-primary" disabled={!online || changePassword.isPending} type="submit">{changePassword.isPending ? 'Updating…' : 'Change password'}</button>
-          <button className="text-button" disabled={!online} onClick={signOut} type="button">Sign out</button>
-        </form>
+          <div className="settings-account-actions">
+            <button className="text-button" disabled={!online} onClick={() => setChangePasswordOpen(true)} type="button">Change password</button>
+            <button className="text-button" disabled={!online} onClick={signOut} type="button">Sign out</button>
+          </div>
         </section>
+        {changePasswordOpen ? (
+          <Sheet className="password-sheet" labelledBy="change-password-title" onClose={() => setChangePasswordOpen(false)}>
+            <h2 id="change-password-title">Change password</h2>
+            <p>Choose a new password for your WarrantyVault account.</p>
+            <FormStack className="form-column password-form" onSubmit={passwordForm.handleSubmit((values) => changePassword.mutate(values), (invalid) => focusFirstErrorAfterRender(invalid, passwordFormRef.current))} ref={passwordFormRef}>
+              <Field autoComplete="current-password" error={passwordErrors.currentPassword?.message} label="Current password" type={passwordVisible ? 'text' : 'password'} {...passwordForm.register('currentPassword')} />
+              <Field autoComplete="new-password" error={passwordErrors.newPassword?.message} hint="Use 8 to 72 UTF-8 bytes. Longer passwords are harder to guess." label="New password" type={passwordVisible ? 'text' : 'password'} {...passwordForm.register('newPassword')} />
+              <Field autoComplete="new-password" error={passwordErrors.confirmPassword?.message} label="Confirm new password" type={passwordVisible ? 'text' : 'password'} {...passwordForm.register('confirmPassword')} />
+              <button aria-pressed={passwordVisible} className="text-button password-visibility" onClick={() => setPasswordVisible((visible) => !visible)} type="button">{passwordVisible ? 'Hide passwords' : 'Show passwords'}</button>
+              <ErrorMessage error={changePassword.error} />
+              <div className="sheet-actions">
+                <button className="button button-primary" disabled={!online || changePassword.isPending} type="submit">{changePassword.isPending ? 'Updating…' : 'Update password'}</button>
+                <button className="text-button" disabled={changePassword.isPending} onClick={() => setChangePasswordOpen(false)} type="button">Cancel</button>
+              </div>
+            </FormStack>
+          </Sheet>
+        ) : null}
         <section className="settings-section">
         <header className="section-heading"><h2>Reminders</h2></header>
         <p className="settings-help">Receive at most one daily email with warranties approaching their end date.</p>
         <div className="settings-row">
-          <span>Warranty reminders</span>
           {preferencesQuery.isLoading ? <span role="status">Loading…</span> : preferences ? (
             <div className="preference-controls">
-              <label className="reminder-toggle">
-                <input
-                  checked={preferences.remindersEnabled}
-                  disabled={!online || savePreferences.isPending}
-                  onChange={(event) => savePreferences.mutate({ ...preferences, remindersEnabled: event.target.checked })}
-                  type="checkbox"
-                />
-                <span>{preferences.remindersEnabled ? 'On' : 'Off'}</span>
-              </label>
+              <SwitchControl checked={preferences.remindersEnabled} disabled={!online || savePreferences.isPending} label="Warranty reminders" onChange={(event) => savePreferences.mutate({ ...preferences, remindersEnabled: event.target.checked })} />
               {preferences.remindersEnabled ? (
                 <label className="days-select">
                   <span className="sr-only">Days before expiry</span>
@@ -1390,7 +1616,10 @@ export function SettingsPage() {
                     value={[7, 14, 30, 45, 60, 90].includes(preferences.daysBefore) ? preferences.daysBefore : 'custom'}
                     disabled={!online || savePreferences.isPending}
                     onChange={(event) => {
-                      if (event.target.value === 'custom') setCustomDays(String(preferences.daysBefore));
+                      if (event.target.value === 'custom') {
+                        customDaysForm.reset({ daysBefore: String(preferences.daysBefore) });
+                        setCustomDaysOpen(true);
+                      }
                       else savePreferences.mutate({ ...preferences, daysBefore: Number(event.target.value) });
                     }}
                   >
@@ -1402,17 +1631,19 @@ export function SettingsPage() {
             </div>
           ) : null}
         </div>
-        {customDays !== '' && preferences?.remindersEnabled ? (
-          <form className="custom-days-row" onSubmit={(event) => { event.preventDefault(); const daysBefore = Number(customDays); if (daysBefore >= 1 && daysBefore <= 120) savePreferences.mutate({ ...preferences, daysBefore }); }}>
-            <label className="field"><span>Days before expiry <small>Choose a number from 1 to 120.</small></span><input aria-label="Custom reminder days" max="120" min="1" onChange={(event) => setCustomDays(event.target.value)} required type="number" value={customDays} /></label>
+        {customDaysOpen && preferences?.remindersEnabled ? (
+          <FormStack className="custom-days-row" onSubmit={customDaysForm.handleSubmit(({ daysBefore }) => savePreferences.mutate({ ...preferences, daysBefore }), (invalid) => focusFirstErrorAfterRender(invalid, customDaysFormRef.current))} ref={customDaysFormRef}>
+            <Field aria-label="Custom reminder days" error={customDaysError} hint="Choose a number from 1 to 120." label="Days before expiry" max="120" min="1" type="number" {...customDaysForm.register('daysBefore')} />
             <button className="text-button" disabled={!online || savePreferences.isPending} type="submit">Save timing</button>
-          </form>
+            <button className="text-button" onClick={() => setCustomDaysOpen(false)} type="button">Cancel</button>
+          </FormStack>
         ) : null}
         </section>
         {meta?.mode === 'local' ? (
           <div className="developer-tools">
             <p className="eyebrow">DEVELOPER TOOLS</p>
             <p>Run the local reminder workflow and print digest emails in the backend console.</p>
+            <SwitchControl checked={resetReminderRun} label="Send again even if already sent" onChange={(event) => setResetReminderRun(event.target.checked)} />
             <button className="text-button" disabled={!online || runReminderCheck.isPending} onClick={() => runReminderCheck.mutate()} type="button">
               {runReminderCheck.isPending ? 'Checking…' : 'Run reminder check now'}
             </button>

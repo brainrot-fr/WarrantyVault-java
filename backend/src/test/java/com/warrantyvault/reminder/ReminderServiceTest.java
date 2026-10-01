@@ -40,8 +40,8 @@ class ReminderServiceTest {
 
         assertEquals(1, result.usersNotified());
         assertEquals(1, result.productsReminded());
-        verify(fixture.reminderLogRepository).existsByUserAndProductAndExpiresOn(
-            fixture.user, fixture.product, LocalDate.parse("2025-01-03"));
+        verify(fixture.productRepository).findUnloggedReminderProducts(
+            fixture.user.getId(), LocalDate.parse("2025-01-02"), LocalDate.parse("2025-01-03"));
     }
 
     @Test
@@ -54,6 +54,18 @@ class ReminderServiceTest {
 
         assertEquals(0, result.usersNotified());
         assertEquals(0, result.productsReminded());
+    }
+
+    @Test
+    void resetRunClearsReminderHistoryBeforeSendingAgain() {
+        ReminderFixture fixture = new ReminderFixture("UTC", "2025-01-31", 30);
+        fixture.mockDue(false);
+
+        ReminderService.RunSummary result = fixture.service.run(
+            Clock.fixed(Instant.parse("2025-01-01T12:00:00Z"), ZoneOffset.UTC), "DEV", null, true);
+
+        assertEquals(1, result.productsReminded());
+        verify(fixture.reminderLogRepository).deleteAllInBatch();
     }
 
     private static final class ReminderFixture {
@@ -84,15 +96,12 @@ class ReminderServiceTest {
 
             space.setId("space-id");
             space.setName("Home");
-            when(spaceRepository.findByUserId(user.getId())).thenReturn(List.of(space));
-
             product.setId("product-id");
             product.setSpace(space);
             product.setProductType("Refrigerator");
             product.setBrand("LG");
             product.setPurchasedOn(LocalDate.parse("2024-01-01"));
             product.setExpiresOn(LocalDate.parse(expiresOn));
-            when(productRepository.findBySpace(space)).thenReturn(List.of(product));
             when(reminderRunRepository.save(any(ReminderRun.class))).thenAnswer(call -> {
                 ReminderRun run = call.getArgument(0);
                 storedRun.set(run);
@@ -102,12 +111,13 @@ class ReminderServiceTest {
             AppProperties properties = new AppProperties();
             properties.setAppBaseUrl("https://warrantyvault.example");
             Executor executor = Runnable::run;
-            service = new ReminderService(userRepository, preferenceRepository, spaceRepository, productRepository,
+            service = new ReminderService(userRepository, preferenceRepository, productRepository,
                 reminderLogRepository, reminderRunRepository, mailService, properties, Clock.systemUTC(), executor);
         }
 
         private void mockDue(boolean logged) {
-            when(reminderLogRepository.existsByUserAndProductAndExpiresOn(user, product, product.getExpiresOn())).thenReturn(logged);
+            when(productRepository.findUnloggedReminderProducts(any(), any(), any()))
+                .thenReturn(logged ? List.of() : List.of(product));
             when(userRepository.findAll(any(Pageable.class))).thenReturn(new PageImpl<>(List.of(user), PageRequest.of(0, 100), 1));
         }
     }

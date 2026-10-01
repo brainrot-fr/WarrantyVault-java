@@ -6,6 +6,7 @@ import com.warrantyvault.user.UserRepository;
 import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import java.util.Arrays;
 import java.time.ZoneId;
@@ -37,7 +38,8 @@ public class AuthController {
     private final Clock clock;
 
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletResponse response) {
+    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest servletRequest,
+                                                 HttpServletResponse response) {
         if (userRepository.existsByEmailIgnoreCase(request.email())) {
             throw new ApiException("EMAIL_TAKEN", "Email already taken", HttpStatus.CONFLICT.value());
         }
@@ -60,11 +62,12 @@ public class AuthController {
         user.setCreatedAt(java.time.Instant.now(clock));
         user.setUpdatedAt(java.time.Instant.now(clock));
         userRepository.save(user);
-        return buildAuthResponse(user, response, HttpStatus.CREATED);
+        return buildAuthResponse(user, servletRequest, response, HttpStatus.CREATED);
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@Valid @RequestBody AuthRequest request, HttpServletResponse response) {
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody AuthRequest request, HttpServletRequest servletRequest,
+                                              HttpServletResponse response) {
         Authentication auth = authenticationManager.authenticate(
             new UsernamePasswordAuthenticationToken(request.email().trim().toLowerCase(), request.password())
         );
@@ -76,7 +79,7 @@ public class AuthController {
         );
         user.setLastLoginAt(java.time.Instant.now(clock));
         userRepository.save(user);
-        return buildAuthResponse(user, response, HttpStatus.OK);
+        return buildAuthResponse(user, servletRequest, response, HttpStatus.OK);
     }
 
     @PostMapping("/refresh")
@@ -86,7 +89,7 @@ public class AuthController {
         if (token == null || token.isBlank()) {
             throw new ApiException("INVALID_CREDENTIALS", "Refresh token required", HttpStatus.UNAUTHORIZED.value());
         }
-        User user = authService.refreshSession(token, response);
+        User user = authService.refreshSession(token, response, request.getHeader("User-Agent"));
         return ResponseEntity.ok()
             .header(HttpHeaders.CACHE_CONTROL, "no-store")
             .body(new AuthResponse(authService.issueAccessToken(user), 1800, UserDto.from(user)));
@@ -96,12 +99,13 @@ public class AuthController {
     public ResponseEntity<Void> logout(HttpServletRequest request, HttpServletResponse response) {
         requireJsonRequest(request);
         authService.logout(getCookieValue("wv_refresh"), response);
-        return ResponseEntity.noContent().build();
+        return ResponseEntity.noContent().header(HttpHeaders.CACHE_CONTROL, "no-store").build();
     }
 
-    private ResponseEntity<AuthResponse> buildAuthResponse(User user, HttpServletResponse response, HttpStatus status) {
+    private ResponseEntity<AuthResponse> buildAuthResponse(User user, HttpServletRequest request,
+                                                            HttpServletResponse response, HttpStatus status) {
         String accessToken = authService.issueAccessToken(user);
-        authService.issueRefreshToken(user, response);
+        authService.issueRefreshToken(user, response, request.getHeader("User-Agent"));
         return ResponseEntity.status(status)
             .header(HttpHeaders.CACHE_CONTROL, "no-store")
             .body(new AuthResponse(accessToken, 1800, UserDto.from(user)));

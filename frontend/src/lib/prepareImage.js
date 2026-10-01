@@ -14,7 +14,6 @@ async function readBuffer(blob) {
 
 export async function detectImageType(file) {
   if (!file || file.size === 0) throw new Error('Choose an image file.');
-  if (file.size > MAX_IMAGE_BYTES) throw new Error('Each image must be 10 MB or smaller.');
   const bytes = new Uint8Array(await readBuffer(file.slice(0, 12)));
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg';
   if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47
@@ -25,6 +24,12 @@ export async function detectImageType(file) {
     throw new Error('HEIC images are not supported in the browser. Choose “Most Compatible” in your camera settings and select a JPEG instead.');
   }
   throw new Error('Choose a JPEG, PNG, or WebP image.');
+}
+
+export async function prepareImageSelection(input) {
+  const selected = input.files?.[0];
+  input.value = '';
+  return selected ? prepareImage(selected) : null;
 }
 
 export async function prepareImage(file) {
@@ -41,7 +46,7 @@ export async function prepareImage(file) {
       image = await loadImage(imageUrl);
     }
     if (sourceType === 'image/png' && file.size < SMALL_PNG_BYTES
-      && Math.max(image.width, image.height) <= MAX_EDGE) return file;
+      && Math.max(image.width, image.height) <= MAX_EDGE) return validateProcessedImage(file);
 
     const longestEdge = Math.max(image.width, image.height);
     const scale = Math.min(1, MAX_EDGE / longestEdge);
@@ -50,6 +55,8 @@ export async function prepareImage(file) {
     canvas.height = Math.max(1, Math.round(image.height * scale));
     const context = canvas.getContext('2d', { alpha: false });
     if (!context) throw new Error('This browser could not prepare the image.');
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
     const jpeg = await new Promise((resolve, reject) => {
       canvas.toBlob((blob) => {
@@ -57,11 +64,17 @@ export async function prepareImage(file) {
         else reject(new Error('This browser could not prepare the image.'));
       }, 'image/jpeg', 0.82);
     });
+    if (jpeg.size > MAX_IMAGE_BYTES) throw new Error('The processed image must be 10 MB or smaller.');
     const basename = file.name.replace(/\.[^.]+$/, '') || 'warranty-document';
     return new File([jpeg], `${basename}.jpg`, { type: 'image/jpeg', lastModified: Date.now() });
   } finally {
     release();
   }
+}
+
+function validateProcessedImage(file) {
+  if (file.size > MAX_IMAGE_BYTES) throw new Error('The processed image must be 10 MB or smaller.');
+  return file;
 }
 
 function loadImage(url) {

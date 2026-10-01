@@ -16,6 +16,7 @@ import com.warrantyvault.user.User;
 import com.warrantyvault.user.UserRepository;
 import java.awt.Color;
 import java.awt.Graphics2D;
+import java.awt.Font;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -79,21 +80,30 @@ public class DemoDataSeeder {
         addMember(home, demo, SpaceRole.OWNER, now);
         addMember(farmhouse, demo, SpaceRole.OWNER, now);
         addMember(home, family, SpaceRole.VIEWER, now);
-        createInvitation(farmhouse, demo, "family@warrantyvault.local", SpaceRole.EDITOR, now);
+        createInvitation(home, demo, "family@warrantyvault.local", SpaceRole.VIEWER, now, "ACCEPTED");
+        createInvitation(farmhouse, demo, "family@warrantyvault.local", SpaceRole.EDITOR, now, "PENDING");
 
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(demo.getTimezone())));
-        seedSpaceProducts(home, demo, today, List.of(
-            new SeedProduct("Refrigerator", "LG", 10, "48999.00"),
-            new SeedProduct("Air Conditioner", "Daikin", 25, "55999.00"),
-            new SeedProduct("Washing Machine", "Bosch", 80, "32990.00"),
-            new SeedProduct("Television", "Sony", 160, "65900.00")
-        ), now);
-        seedSpaceProducts(farmhouse, demo, today, List.of(
-            new SeedProduct("Microwave", "Panasonic", -5, "14990.00"),
-            new SeedProduct("Water Purifier", "Kent", -35, "12999.00"),
-            new SeedProduct("Vacuum Cleaner", "Dyson", 50, "27900.00"),
-            new SeedProduct("Dishwasher", "IFB", 200, "41990.00")
-        ), now);
+        seedSpaceProducts(home, demo, today, homeProducts(), now);
+        seedSpaceProducts(farmhouse, demo, today, farmhouseProducts(), now);
+    }
+
+    static List<SeedProduct> homeProducts() {
+        return List.of(
+            new SeedProduct("Refrigerator", "LG", 10, 24, "48999.00"),
+            new SeedProduct("Air Conditioner", "Daikin", 25, 12, "55999.00"),
+            new SeedProduct("Washing Machine", "Bosch", 80, 24, "32990.00"),
+            new SeedProduct("Television", "Sony", 160, 36, "65900.00")
+        );
+    }
+
+    static List<SeedProduct> farmhouseProducts() {
+        return List.of(
+            new SeedProduct("Microwave", "Panasonic", -5, 12, "14990.00"),
+            new SeedProduct("Water Purifier", "Kent", -35, 24, "12999.00"),
+            new SeedProduct("Vacuum Cleaner", "Dyson", 50, 24, "27900.00"),
+            new SeedProduct("Dishwasher", "IFB", 200, 36, "41990.00")
+        );
     }
 
     private User createUser(String email, String name, Instant now) {
@@ -128,24 +138,27 @@ public class DemoDataSeeder {
         spaceMemberRepository.save(member);
     }
 
-    private void createInvitation(Space space, User inviter, String email, SpaceRole role, Instant now) {
+    private void createInvitation(Space space, User inviter, String email, SpaceRole role, Instant now, String status) {
         Invitation invitation = new Invitation();
         invitation.setId(UuidGenerator.nextId());
         invitation.setSpace(space);
         invitation.setInvitedEmail(email);
         invitation.setRole(role);
         invitation.setInvitedBy(inviter);
-        invitation.setStatus("PENDING");
+        invitation.setStatus(status);
         invitation.setCreatedAt(now);
         invitation.setExpiresAt(now.plusSeconds(14L * 24 * 60 * 60));
+        if ("ACCEPTED".equals(status)) invitation.setRespondedAt(now);
         invitationRepository.save(invitation);
     }
 
     private void seedSpaceProducts(Space space, User creator, LocalDate today, List<SeedProduct> seeds, Instant now) throws IOException {
         for (SeedProduct seed : seeds) {
             LocalDate expiresOn = today.plusDays(seed.expiryOffsetDays());
-            LocalDate purchasedOn = expiresOn.minusMonths(1);
-            StorageService.StoredFile bill = storageService.store(new SeedBill(seed.type(), seed.brand(), seed.price()), space.getId());
+            LocalDate purchasedOn = expiresOn.minusMonths(seed.warrantyMonths());
+            LocalDate computedExpiry = purchasedOn.plusMonths(seed.warrantyMonths());
+            StorageService.StoredFile bill = storageService.store(
+                new SeedBill(seed.type(), seed.brand(), seed.price(), purchasedOn), space.getId());
             Product product = new Product();
             product.setId(UuidGenerator.nextId());
             product.setSpace(space);
@@ -153,8 +166,8 @@ public class DemoDataSeeder {
             product.setProductType(seed.type());
             product.setBrand(seed.brand());
             product.setPurchasedOn(purchasedOn);
-            product.setWarrantyMonths(1);
-            product.setExpiresOn(purchasedOn.plusMonths(1));
+            product.setWarrantyMonths(seed.warrantyMonths());
+            product.setExpiresOn(computedExpiry);
             product.setPurchasePrice(new BigDecimal(seed.price()));
             product.setCurrency("INR");
             product.setBillKey(bill.key());
@@ -166,23 +179,32 @@ public class DemoDataSeeder {
         }
     }
 
-    private record SeedProduct(String type, String brand, int expiryOffsetDays, String price) {}
+    record SeedProduct(String type, String brand, int expiryOffsetDays, int warrantyMonths, String price) {}
 
     private static final class SeedBill implements MultipartFile {
         private final String label;
         private final byte[] bytes;
 
-        private SeedBill(String type, String brand, String price) throws IOException {
-            label = type + " " + brand + " • INR " + price;
+        private SeedBill(String type, String brand, String price, LocalDate purchasedOn) throws IOException {
+            label = type + " " + brand + " INR " + price;
             BufferedImage image = new BufferedImage(640, 800, BufferedImage.TYPE_INT_RGB);
             Graphics2D graphics = image.createGraphics();
             graphics.setColor(new Color(248, 245, 237));
             graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
             graphics.setColor(new Color(44, 59, 50));
-            graphics.drawString("WARRANTYVAULT DEMO RECEIPT", 48, 72);
+            graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 28));
+            graphics.drawString("HOME APPLIANCES", 48, 68);
+            graphics.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 22));
             graphics.setColor(new Color(91, 101, 96));
-            graphics.drawString(label, 48, 118);
-            graphics.drawLine(48, 142, 592, 142);
+            graphics.drawString("Store receipt", 48, 110);
+            graphics.drawString("Date: " + purchasedOn, 48, 152);
+            graphics.drawString("Model: " + brand + " " + type, 48, 194);
+            graphics.drawLine(48, 222, 592, 222);
+            graphics.setColor(new Color(44, 59, 50));
+            graphics.drawString("Item: " + label, 48, 266);
+            graphics.drawLine(48, 292, 592, 292);
+            graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 26));
+            graphics.drawString("TOTAL: INR " + price, 48, 342);
             graphics.dispose();
             ByteArrayOutputStream output = new ByteArrayOutputStream();
             ImageIO.write(image, "png", output);

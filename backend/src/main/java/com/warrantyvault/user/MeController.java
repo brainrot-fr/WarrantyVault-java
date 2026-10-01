@@ -2,8 +2,6 @@ package com.warrantyvault.user;
 
 import com.warrantyvault.auth.UserDto;
 import com.warrantyvault.common.ApiException;
-import com.warrantyvault.security.RefreshToken;
-import com.warrantyvault.security.RefreshTokenRepository;
 import com.warrantyvault.security.CurrentUser;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -22,6 +20,9 @@ import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.CookieValue;
+import com.warrantyvault.auth.AuthService;
+import com.warrantyvault.common.validation.MaxUtf8Bytes;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 
@@ -32,7 +33,7 @@ public class MeController {
     private final CurrentUser currentUser;
     private final UserRepository userRepository;
     private final NotificationPreferenceRepository preferenceRepository;
-    private final RefreshTokenRepository refreshTokenRepository;
+    private final AuthService authService;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
 
@@ -61,7 +62,8 @@ public class MeController {
 
     @PostMapping("/me/password")
     @Transactional
-    public ResponseEntity<Void> changePassword(@Valid @RequestBody PasswordChangeRequest request) {
+    public ResponseEntity<Void> changePassword(@Valid @RequestBody PasswordChangeRequest request,
+                                               @CookieValue(name = "wv_refresh", required = false) String currentRefreshToken) {
         User user = currentUser.get();
         if (!passwordEncoder.matches(request.currentPassword(), user.getPasswordHash())) {
             throw new ApiException("INVALID_CURRENT_PASSWORD", "Current password is incorrect", HttpStatus.BAD_REQUEST.value());
@@ -72,12 +74,10 @@ public class MeController {
         user.setPasswordHash(passwordEncoder.encode(request.newPassword()));
         user.setUpdatedAt(java.time.Instant.now(clock));
         userRepository.save(user);
-        java.time.Instant revokedAt = java.time.Instant.now(clock);
-        java.util.List<RefreshToken> tokens = refreshTokenRepository.findByUserId(user.getId());
-        tokens.forEach(token -> {
-            if (token.getRevokedAt() == null) token.setRevokedAt(revokedAt);
-        });
-        refreshTokenRepository.saveAll(tokens);
+        if (currentRefreshToken == null || currentRefreshToken.isBlank()) {
+            throw new ApiException("INVALID_CREDENTIALS", "Refresh session is required to change the password", HttpStatus.UNAUTHORIZED.value());
+        }
+        authService.revokeOtherRefreshFamilies(user.getId(), currentRefreshToken);
         return ResponseEntity.noContent().build();
     }
 
@@ -108,8 +108,8 @@ public class MeController {
         @Pattern(regexp = "^[A-Za-z]{3}$") String currency
     ) {}
     public record PasswordChangeRequest(
-        @NotBlank @Size(max = 72) String currentPassword,
-        @NotBlank @Size(min = 8, max = 72) String newPassword
+        @NotBlank @Size(max = 72) @MaxUtf8Bytes(72) String currentPassword,
+        @NotBlank @Size(min = 8, max = 72) @MaxUtf8Bytes(72) String newPassword
     ) {}
     public record PreferenceRequest(boolean remindersEnabled, @Min(1) @Max(120) int daysBefore) {}
     public record PreferenceDto(boolean remindersEnabled, int daysBefore) {

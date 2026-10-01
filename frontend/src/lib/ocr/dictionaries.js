@@ -1,4 +1,19 @@
-export const BRAND_DICTIONARY = [
+function deduplicateDictionary(entries) {
+  const labels = new Map();
+  for (const [label, variants] of entries) {
+    const labelKey = label.toLocaleLowerCase().replace(/[^a-z0-9]/g, '');
+    const existing = labels.get(labelKey);
+    const uniqueVariants = [...new Set(variants.map((variant) => variant.trim().toLocaleLowerCase()))];
+    if (existing) {
+      existing[1].push(...uniqueVariants.filter((variant) => !existing[1].includes(variant)));
+    } else {
+      labels.set(labelKey, [label, uniqueVariants]);
+    }
+  }
+  return [...labels.values()];
+}
+
+const brandEntries = [
   ['Samsung', ['samsung']],
   ['LG', ['lg']],
   ['Philips', ['philips']],
@@ -169,7 +184,9 @@ export const BRAND_DICTIONARY = [
   ['V-Guard', ['vguard']]
 ];
 
-export const PRODUCT_TYPE_DICTIONARY = [
+export const BRAND_DICTIONARY = deduplicateDictionary(brandEntries);
+
+const productTypeEntries = [
   ['AC', ['ac', 'split ac', 'window ac', 'air conditioner', 'air conditioning unit']],
   ['Air Purifier', ['air purifier', 'air cleaner']],
   ['Air Cooler', ['air cooler', 'desert cooler']],
@@ -254,3 +271,5 @@ export const PRODUCT_TYPE_DICTIONARY = [
   ['Car Battery', ['car battery', 'automotive battery']],
   ['Tire', ['car tire', 'tyre', 'automotive tire']]
 ];
+
+export const PRODUCT_TYPE_DICTIONARY = deduplicateDictionary(productTypeEntries);

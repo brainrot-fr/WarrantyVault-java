@@ -17,11 +17,16 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 @Service
 public class InvitationService {
+    private static final Logger logger = LoggerFactory.getLogger(InvitationService.class);
     private final InvitationRepository invitationRepository;
     private final SpaceMemberRepository spaceMemberRepository;
     private final SpaceRepository spaceRepository;
@@ -71,6 +76,7 @@ public class InvitationService {
         invitation.setCreatedAt(now);
         invitation.setExpiresAt(now.plusSeconds(14L * 24 * 60 * 60));
         Invitation saved = invitationRepository.save(invitation);
+        InvitationView response = InvitationView.forDelivery(saved);
         String url = appProperties.getAppBaseUrl() + "/invitations";
         String roleText = role == SpaceRole.EDITOR ? "an editor" : "a viewer";
         String subject = inviter.getName() + " invited you to " + space.getName() + " on WarrantyVault";
@@ -81,8 +87,19 @@ public class InvitationService {
             + escape(inviter.getName()) + " invited you to <strong>" + escape(space.getName())
             + "</strong> as " + roleText + ".</p><p><a href=\"" + escape(url)
             + "\" style=\"display:inline-block;background:#516b58;color:#fff;padding:12px 18px;text-decoration:none;border-radius:8px\">View invitation</a></p></div>";
-        mailService.send(normalizedEmail, subject, plain, html);
-        return InvitationView.from(saved);
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                try {
+                    mailService.send(normalizedEmail, subject, plain, html);
+                    response.setEmailSent(true);
+                } catch (RuntimeException exception) {
+                    logger.warn("Invitation email delivery failed for invitation {}: {}",
+                        saved.getId(), exception.getClass().getSimpleName());
+                }
+            }
+        });
+        return response;
     }
 
     @Transactional(readOnly = true)
@@ -140,10 +157,11 @@ public class InvitationService {
         spaceMemberRepository.delete(targetMember);
     }
 
+    @Transactional(readOnly = true)
     public List<InviteForUser> pendingForCurrentUser() {
         User user = currentUser.get();
         Instant now = Instant.now(clock);
-        return invitationRepository.findByInvitedEmailAndStatus(user.getEmail().toLowerCase(Locale.ROOT), "PENDING")
+        return invitationRepository.findByInviteeWithDetails(user.getEmail().toLowerCase(Locale.ROOT), "PENDING")
             .stream().filter(invitation -> invitation.getExpiresAt().isAfter(now))
             .map(InviteForUser::from).toList();
     }
@@ -218,11 +236,44 @@ public class InvitationService {
             return new MemberView(member.getUser().getId(), member.getUser().getName(), member.getUser().getEmail(), member.getRole(), member.getAddedAt());
         }
     }
-    public record InvitationView(String id, String email, SpaceRole role, String status, Instant createdAt, Instant expiresAt) {
+    public static final class InvitationView {
+        private final String id;
+        private final String email;
+        private final SpaceRole role;
+        private final String status;
+        private final Instant createdAt;
+        private final Instant expiresAt;
+        private boolean emailSent;
+
+        private InvitationView(String id, String email, SpaceRole role, String status, Instant createdAt,
+                               Instant expiresAt, boolean emailSent) {
+            this.id = id;
+            this.email = email;
+            this.role = role;
+            this.status = status;
+            this.createdAt = createdAt;
+            this.expiresAt = expiresAt;
+            this.emailSent = emailSent;
+        }
+
         static InvitationView from(Invitation invitation) {
             return new InvitationView(invitation.getId(), invitation.getInvitedEmail(), invitation.getRole(),
-                invitation.getStatus(), invitation.getCreatedAt(), invitation.getExpiresAt());
+                invitation.getStatus(), invitation.getCreatedAt(), invitation.getExpiresAt(), true);
         }
+
+        static InvitationView forDelivery(Invitation invitation) {
+            return new InvitationView(invitation.getId(), invitation.getInvitedEmail(), invitation.getRole(),
+                invitation.getStatus(), invitation.getCreatedAt(), invitation.getExpiresAt(), false);
+        }
+
+        public String getId() { return id; }
+        public String getEmail() { return email; }
+        public SpaceRole getRole() { return role; }
+        public String getStatus() { return status; }
+        public Instant getCreatedAt() { return createdAt; }
+        public Instant getExpiresAt() { return expiresAt; }
+        public boolean isEmailSent() { return emailSent; }
+        void setEmailSent(boolean emailSent) { this.emailSent = emailSent; }
     }
     public record InviteForUser(String id, String spaceName, String invitedByName, SpaceRole role, Instant createdAt, Instant expiresAt) {
         static InviteForUser from(Invitation invitation) {

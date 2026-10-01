@@ -1,12 +1,10 @@
 package com.warrantyvault.dashboard;
 
-import com.warrantyvault.member.SpaceMember;
-import com.warrantyvault.member.SpaceMemberRepository;
 import com.warrantyvault.product.Product;
 import com.warrantyvault.product.ProductRepository;
+import com.warrantyvault.product.CurrencyValueTotal;
 import com.warrantyvault.user.NotificationPreferenceRepository;
 import com.warrantyvault.user.User;
-import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -17,7 +15,6 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,16 +25,13 @@ public class DashboardService {
     private static final int UPCOMING_LIMIT = 50;
     private static final int RECENTLY_EXPIRED_LIMIT = 20;
 
-    private final SpaceMemberRepository memberRepository;
     private final ProductRepository productRepository;
     private final NotificationPreferenceRepository preferenceRepository;
     private final Clock clock;
 
-    public DashboardService(SpaceMemberRepository memberRepository,
-                           ProductRepository productRepository,
+    public DashboardService(ProductRepository productRepository,
                            NotificationPreferenceRepository preferenceRepository,
                            Clock clock) {
-        this.memberRepository = memberRepository;
         this.productRepository = productRepository;
         this.preferenceRepository = preferenceRepository;
         this.clock = clock;
@@ -51,15 +45,11 @@ public class DashboardService {
             .map(preference -> preference.getDaysBefore())
             .orElse(DEFAULT_REMINDER_DAYS);
 
-        List<Product> products = new ArrayList<>();
-        for (SpaceMember membership : memberRepository.findByUser(user)) {
-            products.addAll(productRepository.findBySpace(membership.getSpace()));
-        }
+        List<Product> products = productRepository.findAllForDashboard(user.getId());
 
         int active = 0;
         int expiringSoon = 0;
         int expired = 0;
-        Map<String, BigDecimal> values = new TreeMap<>();
         List<ProductSummary> upcoming = new ArrayList<>();
         List<ProductSummary> recentlyExpired = new ArrayList<>();
 
@@ -72,7 +62,6 @@ public class DashboardService {
                 case "EXPIRING_SOON" -> expiringSoon++;
                 default -> expired++;
             }
-            values.merge(product.getCurrency(), product.getPurchasePrice(), BigDecimal::add);
             ProductSummary summary = new ProductSummary(
                 product.getId(),
                 product.getSpace().getId(),
@@ -94,10 +83,9 @@ public class DashboardService {
         recentlyExpired.sort(Comparator.comparingLong(ProductSummary::daysRemaining).reversed());
 
         Map<String, String> coveredValue = new LinkedHashMap<>();
-        values.forEach((currency, amount) -> coveredValue.put(
-            currency,
-            amount.setScale(2, RoundingMode.HALF_UP).toPlainString()
-        ));
+        for (CurrencyValueTotal total : productRepository.findCoveredValueTotals(user.getId(), today)) {
+            coveredValue.put(total.currency(), total.amount().setScale(2, RoundingMode.HALF_UP).toPlainString());
+        }
 
         return new DashboardResponse(
             new Counts(active, expiringSoon, expired),

@@ -16,6 +16,9 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
+import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -67,18 +70,43 @@ public class SpaceService {
         return saved;
     }
 
+    @Transactional(readOnly = true)
     public List<Space> listSpacesForUser(String userId) {
         return spaceRepository.findByUserId(userId);
     }
 
+    @Transactional(readOnly = true)
     public List<SpaceResponse> listSpaceResponses(String userId) {
-        return listSpacesForUser(userId).stream().map(space -> toResponse(space, userId)).toList();
+        User viewer = userRepository.findById(userId).orElseThrow(() -> new ApiException("NOT_FOUND", "User not found", 404));
+        List<SpaceMember> memberships = spaceMemberRepository.findByUserId(userId);
+        if (memberships.isEmpty()) return List.of();
+        List<String> spaceIds = memberships.stream().map(membership -> membership.getSpace().getId()).toList();
+        LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(viewer.getTimezone())));
+        int daysBefore = preferenceRepository.findById(userId).map(pref -> pref.getDaysBefore()).orElse(30);
+        Map<String, SpaceProductAggregate> productAggregates = productRepository
+            .findSpaceProductAggregates(userId, today, today.plusDays(daysBefore))
+            .stream().collect(Collectors.toMap(SpaceProductAggregate::spaceId, aggregate -> aggregate));
+        Map<String, Long> memberCounts = spaceMemberRepository.countMembersBySpaceIds(spaceIds).stream()
+            .collect(Collectors.toMap(SpaceMemberCount::spaceId, SpaceMemberCount::memberCount));
+        Map<String, SpaceResponse.NextExpiry> nextExpiries = new HashMap<>();
+        for (SpaceNextExpiry next : productRepository.findNextExpiryForUser(userId, today)) {
+            nextExpiries.putIfAbsent(next.spaceId(),
+                new SpaceResponse.NextExpiry(next.productId(), next.productType() + " " + next.brand(), next.expiresOn()));
+        }
+        return memberships.stream().map(membership -> {
+            Space space = membership.getSpace();
+            SpaceProductAggregate aggregate = productAggregates.get(space.getId());
+            return toResponse(space, membership.getRole(), memberCounts.getOrDefault(space.getId(), 0L),
+                aggregate, nextExpiries.get(space.getId()));
+        }).toList();
     }
 
+    @Transactional(readOnly = true)
     public SpaceResponse spaceResponse(String spaceId, String userId) {
         return toResponse(requireMembership(spaceId, userId).getSpace(), userId);
     }
 
+    @Transactional(readOnly = true)
     public SpaceResponse createdSpaceResponse(Space space, String userId) {
         return toResponse(space, userId);
     }
@@ -163,6 +191,20 @@ public class SpaceService {
             expired,
             space.getCreatedAt(),
             space.getUpdatedAt(),
+            new SpaceResponse.Permissions(SpacePermissions.canDeleteSpace(role), SpacePermissions.canDeleteSpace(role),
+                SpacePermissions.canManageMembers(role), SpacePermissions.canCreateProduct(role),
+                SpacePermissions.canDeleteProduct(role))
+        );
+    }
+
+    private SpaceResponse toResponse(Space space, SpaceRole role, long memberCount,
+                                     SpaceProductAggregate aggregate, SpaceResponse.NextExpiry next) {
+        return new SpaceResponse(
+            space.getId(), space.getName(), space.getDescription(), role, memberCount,
+            aggregate == null ? 0 : aggregate.productCount(), next,
+            aggregate == null || aggregate.expiringSoonCount() == null ? 0 : aggregate.expiringSoonCount(),
+            aggregate == null || aggregate.expiredCount() == null ? 0 : aggregate.expiredCount(),
+            space.getCreatedAt(), space.getUpdatedAt(),
             new SpaceResponse.Permissions(SpacePermissions.canDeleteSpace(role), SpacePermissions.canDeleteSpace(role),
                 SpacePermissions.canManageMembers(role), SpacePermissions.canCreateProduct(role),
                 SpacePermissions.canDeleteProduct(role))

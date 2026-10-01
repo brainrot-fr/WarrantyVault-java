@@ -23,8 +23,8 @@ export default defineConfig({
         short_name: 'Warranty',
         start_url: '/dashboard',
         display: 'standalone',
-        background_color: '#f4efe8',
-        theme_color: '#1f2a2d',
+        background_color: '#f4f0e8',
+        theme_color: '#f4f0e8',
         icons: [
           { src: '/icons/icon-192.png', sizes: '192x192', type: 'image/png' },
           { src: '/icons/icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },

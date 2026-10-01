@@ -12,6 +12,23 @@ afterEach(() => {
 });
 
 describe('API refresh handling', () => {
+  it('retries a transient 503 and restores a valid session after the server wakes', async () => {
+    vi.useFakeTimers();
+    let refreshCount = 0;
+    const fetchMock = vi.fn(async () => {
+      refreshCount += 1;
+      if (refreshCount === 1) return Response.json({ code: 'UNAVAILABLE' }, { status: 503 });
+      return Response.json({ accessToken: tokenFor('user-2', 2), expiresInSeconds: 1800, user: { id: 'user-2' } });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const sessionPromise = import('./api.js').then(({ refreshSession }) => refreshSession());
+    await vi.advanceTimersByTimeAsync(1_000);
+    await expect(sessionPromise).resolves.toMatchObject({ user: { id: 'user-2' } });
+    expect(refreshCount).toBe(2);
+    vi.useRealTimers();
+  });
+
   it('shares one refresh request across simultaneous 401 responses and retries each request once', async () => {
     const oldToken = tokenFor('user-1', 1);
     const nextToken = tokenFor('user-1', 2);

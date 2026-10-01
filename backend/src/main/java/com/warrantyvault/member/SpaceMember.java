@@ -12,7 +12,9 @@ import jakarta.persistence.IdClass;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.FetchType;
 import java.io.Serializable;
+import java.util.Objects;
 import java.time.Instant;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -24,12 +26,12 @@ import lombok.Setter;
 @Getter @Setter @NoArgsConstructor
 public class SpaceMember {
     @Id
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "space_id", nullable = false)
     private Space space;
 
     @Id
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
@@ -44,4 +46,23 @@ public class SpaceMember {
 class SpaceMemberId implements Serializable {
     private String space;
     private String user;
+
+    public SpaceMemberId() {}
+
+    public SpaceMemberId(String space, String user) {
+        this.space = space;
+        this.user = user;
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) return true;
+        if (!(other instanceof SpaceMemberId that)) return false;
+        return Objects.equals(space, that.space) && Objects.equals(user, that.user);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(space, user);
+    }
 }

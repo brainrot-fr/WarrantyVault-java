@@ -39,8 +39,9 @@ public class SpaceController {
 
     @PatchMapping("/spaces/{spaceId}")
     public SpaceResponse updateSpace(@PathVariable String spaceId, @Valid @RequestBody UpdateSpaceRequest request) {
-        Space space = spaceService.updateSpace(spaceId, currentUser.get().getId(), request.name(), request.description());
-        return spaceService.createdSpaceResponse(space, currentUser.get().getId());
+        User user = currentUser.get();
+        Space space = spaceService.updateSpace(spaceId, user.getId(), request.name(), request.description());
+        return spaceService.createdSpaceResponse(space, user.getId());
     }
 
     @DeleteMapping("/spaces/{spaceId}")

@@ -15,12 +15,14 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.scheduling.annotation.Scheduled;
 import jakarta.servlet.http.HttpServletResponse;
 
 @Service
@@ -29,12 +31,14 @@ public class AuthService {
     private static final long REFRESH_TOKEN_TTL_SECONDS = 30L * 24 * 60 * 60;
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final String DEV_JWT_SECRET = "dev-secret-key-1234567890-abcdef";
+    private static final long ROTATION_GRACE_SECONDS = 15;
 
     private final JwtService jwtService;
     private final RefreshTokenRepository refreshTokenRepository;
     private final AppProperties appProperties;
     private final Environment environment;
     private final Clock clock;
+    private final ConcurrentHashMap<String, GraceToken> graceTokens = new ConcurrentHashMap<>();
 
     public String issueAccessToken(User user) {
         return jwtService.generateAccessToken(user.getId(), user.getEmail());
@@ -42,6 +46,11 @@ public class AuthService {
 
     @Transactional
     public void issueRefreshToken(User user, HttpServletResponse response) {
+        issueRefreshToken(user, response, null);
+    }
+
+    @Transactional
+    public void issueRefreshToken(User user, HttpServletResponse response, String userAgent) {
         String raw = newOpaqueToken();
         Instant now = Instant.now(clock);
         RefreshToken token = new RefreshToken();
@@ -51,16 +60,31 @@ public class AuthService {
         token.setFamilyId(UUID.randomUUID().toString());
         token.setExpiresAt(now.plusSeconds(REFRESH_TOKEN_TTL_SECONDS));
         token.setCreatedAt(now);
+        token.setUserAgent(normalizeUserAgent(userAgent));
         refreshTokenRepository.save(token);
         writeRefreshCookie(response, raw, REFRESH_TOKEN_TTL_SECONDS);
     }
 
     @Transactional
     public User refreshSession(String rawToken, HttpServletResponse response) {
+        return refreshSession(rawToken, response, null);
+    }
+
+    @Transactional
+    public User refreshSession(String rawToken, HttpServletResponse response, String userAgent) {
         Instant now = Instant.now(clock);
-        RefreshToken token = refreshTokenRepository.findByTokenHashForUpdate(sha256(rawToken))
+        String tokenHash = sha256(rawToken);
+        graceTokens.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(now));
+        RefreshToken token = refreshTokenRepository.findByTokenHashForUpdate(tokenHash)
             .orElseThrow(() -> invalidRefreshToken());
         if (token.getRevokedAt() != null) {
+            GraceToken grace = graceTokens.get(tokenHash);
+            if (token.getReplacedBy() != null
+                && token.getRevokedAt().plusSeconds(ROTATION_GRACE_SECONDS).isAfter(now)
+                && grace != null && grace.expiresAt().isAfter(now)) {
+                writeRefreshCookie(response, grace.rawToken(), REFRESH_TOKEN_TTL_SECONDS);
+                return token.getUser();
+            }
             revokeFamily(token.getFamilyId(), now);
             throw invalidRefreshToken();
         }
@@ -77,12 +101,36 @@ public class AuthService {
         newToken.setFamilyId(token.getFamilyId());
         newToken.setExpiresAt(now.plusSeconds(REFRESH_TOKEN_TTL_SECONDS));
         newToken.setCreatedAt(now);
+        newToken.setUserAgent(normalizeUserAgent(userAgent));
         refreshTokenRepository.save(newToken);
         token.setRevokedAt(now);
         token.setReplacedBy(newToken.getId());
         refreshTokenRepository.save(token);
+        graceTokens.put(tokenHash, new GraceToken(newRaw, now.plusSeconds(ROTATION_GRACE_SECONDS)));
         writeRefreshCookie(response, newRaw, REFRESH_TOKEN_TTL_SECONDS);
         return user;
+    }
+
+    @Transactional
+    public void revokeOtherRefreshFamilies(String userId, String currentRawToken) {
+        RefreshToken current = refreshTokenRepository.findByTokenHashForUpdate(sha256(currentRawToken))
+            .filter(token -> token.getUser().getId().equals(userId))
+            .filter(token -> token.getRevokedAt() == null && token.getExpiresAt().isAfter(Instant.now(clock)))
+            .orElseThrow(this::invalidRefreshToken);
+        Instant now = Instant.now(clock);
+        List<RefreshToken> tokens = refreshTokenRepository.findByUserId(userId);
+        tokens.stream()
+            .filter(token -> !token.getFamilyId().equals(current.getFamilyId()) && token.getRevokedAt() == null)
+            .forEach(token -> token.setRevokedAt(now));
+        refreshTokenRepository.saveAll(tokens);
+    }
+
+    @Scheduled(cron = "0 15 3 * * *")
+    @Transactional
+    public void cleanExpiredTokens() {
+        Instant cutoff = Instant.now(clock).minusSeconds(REFRESH_TOKEN_TTL_SECONDS);
+        refreshTokenRepository.deleteByExpiresAtBeforeOrRevokedAtBefore(cutoff, cutoff);
+        graceTokens.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(Instant.now(clock)));
     }
 
     @Transactional
@@ -109,7 +157,7 @@ public class AuthService {
         ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from("wv_refresh", value)
             .httpOnly(true)
             .secure(secure)
-            .path("/api/auth")
+            .path("/api")
             .sameSite(appProperties.getCookie().getSameSite())
             .maxAge(maxAgeSeconds);
         String domain = appProperties.getCookie().getDomain();
@@ -122,6 +170,13 @@ public class AuthService {
         SECURE_RANDOM.nextBytes(bytes);
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
+
+    private String normalizeUserAgent(String userAgent) {
+        if (userAgent == null || userAgent.isBlank()) return null;
+        return userAgent.substring(0, Math.min(255, userAgent.length()));
+    }
+
+    private record GraceToken(String rawToken, Instant expiresAt) {}
 
     private ApiException invalidRefreshToken() {
         return new ApiException("INVALID_CREDENTIALS", "Invalid refresh token", HttpStatus.UNAUTHORIZED.value());

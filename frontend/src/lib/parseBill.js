@@ -84,23 +84,50 @@ function findPurchaseDate(text, localeHint, today) {
   return candidates[0]?.date || '';
 }
 
-function hasWholePhrase(text, phrase) {
-  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'iu').test(text);
-}
-
 function findDictionaryValue(text, dictionary) {
   const candidates = dictionary.flatMap(([label, variants]) => variants.map((variant) => ({ label, variant })))
-    .sort((left, right) => right.variant.length - left.variant.length);
-  return candidates.find(({ variant }) => hasWholePhrase(text, variant))?.label || '';
+    .map((candidate) => ({
+      ...candidate,
+      match: findWholePhrase(text, candidate.variant)
+    }))
+    .filter((candidate) => candidate.match && isUnambiguousBrand(candidate, text))
+    .sort((left, right) => left.match.index - right.match.index || right.variant.length - left.variant.length);
+  return candidates[0]?.label || '';
+}
+
+function findWholePhrase(text, phrase) {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'giu').exec(text);
+}
+
+function isUnambiguousBrand(candidate, text) {
+  if (candidate.label !== 'Nothing') return true;
+  const { match } = candidate;
+  if (/^nothing\s+to\s+declare\b/i.test(text.slice(match.index))) return false;
+  if (match[0] === 'Nothing' || match[0] === 'NOTHING') return true;
+  const context = text.slice(Math.max(0, match.index - 32), match.index + match[0].length + 32);
+  return /\b(?:brand|make|model|sold\s+by)\b/i.test(context);
 }
 
 function findAmount(text) {
-  const amountPattern = /\b(grand\s+total|amount\s+payable|net\s+amount|total|mrp)\b[\s:=-]{0,12}(?:(?:₹|inr|rs\.?|\$)\s*)?(\d[\d,]*(?:\.\d{1,2})?)/gi;
+  const amountPattern = /\b(grand\s+total|amount\s+payable|net\s+amount|sub[\s-]*total|total|mrp)\b[\s:=-]{0,12}(?:(?:₹|inr|rs\.?|\$)\s*)?(\d[\d,]*(?:\.\d{1,2})?)/gi;
+  const priority = {
+    grandtotal: 5,
+    amountpayable: 5,
+    netamount: 4,
+    total: 3,
+    mrp: 1,
+    subtotal: 0
+  };
   const amounts = [...text.matchAll(amountPattern)]
-    .map((match) => match[2].replace(/,/g, ''))
-    .filter((amount) => Number.isFinite(Number(amount)));
-  return amounts.sort((left, right) => Number(right) - Number(left))[0] || '';
+    .map((match) => ({
+      amount: match[2].replace(/,/g, ''),
+      priority: priority[match[1].toLowerCase().replace(/[\s-]+/g, '')] ?? 0,
+      index: match.index
+    }))
+    .filter(({ amount, priority: amountPriority }) => amountPriority > 0 && Number.isFinite(Number(amount)))
+    .sort((left, right) => right.priority - left.priority || right.index - left.index);
+  return amounts[0]?.amount || '';
 }
 
 function findWarrantyMonths(text) {

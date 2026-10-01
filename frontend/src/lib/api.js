@@ -3,6 +3,7 @@ const baseUrl = configuredBase || (import.meta.env.DEV ? 'http://localhost:8080'
 let accessToken = null;
 let refreshPromise = null;
 let activeUserId = '';
+const REQUEST_TIMEOUT_MS = 30_000;
 
 function userIdForToken(token) {
   try {
@@ -38,21 +39,40 @@ export function clearCachedUserData() {
 
 async function refreshAccessToken() {
   if (!refreshPromise) {
-    refreshPromise = fetch(`${baseUrl}/api/auth/refresh`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Requested-With': 'warrantyvault'
-      },
-      body: '{}'
-    })
-      .then(async (response) => {
-        if (!response.ok) return null;
-        const session = await response.json();
-        accessToken = session.accessToken;
-        return session;
-      })
+    refreshPromise = (async () => {
+      const startedAt = Date.now();
+      let attempt = 0;
+      while (true) {
+        const controller = new globalThis.AbortController();
+        const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+        try {
+          const response = await fetch(`${baseUrl}/api/auth/refresh`, {
+            method: 'POST',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Requested-With': 'warrantyvault'
+            },
+            body: '{}',
+            signal: controller.signal
+          });
+          if (response.status === 401) return null;
+          if (response.ok) {
+            const session = await response.json();
+            setAccessToken(session.accessToken);
+            return session;
+          }
+          if (response.status < 500) throw new ApiError(response, await readProblem(response));
+        } catch (error) {
+          if (error instanceof ApiError) throw error;
+        } finally {
+          clearTimeout(timeout);
+        }
+        if (Date.now() - startedAt >= 60_000) attempt = Math.max(attempt, 3);
+        await new Promise((resolve) => setTimeout(resolve, Math.min(8_000, 1_000 * (2 ** attempt))));
+        attempt += 1;
+      }
+    })()
       .finally(() => {
         refreshPromise = null;
       });
@@ -64,9 +84,17 @@ export class ApiError extends Error {
   constructor(response, problem) {
     super(problem?.detail || problem?.title || `Request failed (${response.status})`);
     this.name = 'ApiError';
-    this.status = response.status;
+    this.status = response?.status || 0;
     this.code = problem?.code || 'REQUEST_FAILED';
     this.fieldErrors = problem?.fieldErrors || {};
+  }
+}
+
+async function readProblem(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
   }
 }
 
@@ -83,19 +111,26 @@ export async function apiRequest(path, options = {}) {
   }
   if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
 
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...requestOptions,
-    headers,
-    credentials: 'include'
-  });
+  const controller = new globalThis.AbortController();
+  const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...requestOptions,
+      headers,
+      credentials: 'include',
+      signal: requestOptions.signal || controller.signal
+    });
+  } catch (error) {
+    if (error.name === 'AbortError' && requestOptions.signal?.aborted) throw error;
+    throw new ApiError(null, { code: 'NETWORK', detail: 'You appear to be offline or the server is unreachable.' });
+  } finally {
+    clearTimeout(timeout);
+  }
   const publicAuthPath = /^\/api\/auth\/(login|register|refresh|logout)$/.test(path);
   if (response.status === 401 && !skipRefresh && !publicAuthPath) {
     let session = null;
-    try {
-      session = await refreshAccessToken();
-    } catch {
-      session = null;
-    }
+    session = await refreshAccessToken();
     if (session) return apiRequest(path, { ...options, skipRefresh: true });
     clearCachedUserData();
     clearAccessToken();

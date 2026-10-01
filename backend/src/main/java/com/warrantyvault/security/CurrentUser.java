@@ -20,7 +20,8 @@ public class CurrentUser {
         if (auth == null || auth.getName() == null) {
             throw new ApiException("INVALID_CREDENTIALS", "Authentication is required", 401);
         }
-        return userRepository.findByEmailIgnoreCase(auth.getName())
+        if (auth.getDetails() instanceof User user) return user;
+        return userRepository.findById(auth.getName())
             .orElseThrow(() -> new ApiException("INVALID_CREDENTIALS", "Authentication is required", 401));
     }
 }

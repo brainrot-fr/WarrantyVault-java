@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { apiJson, clearAccessToken, clearCachedUserData, refreshSession, setAccessToken } from './api.js';
+import { queryClient } from './queryClient.js';
 
 const AuthContext = createContext(null);
 
@@ -7,9 +8,11 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [status, setStatus] = useState('loading');
   const [bootstrapError, setBootstrapError] = useState('');
+  const [bootstrapWaiting, setBootstrapWaiting] = useState(false);
 
   const acceptSession = useCallback((nextSession) => {
     if (nextSession?.accessToken) {
+      queryClient.clear();
       setAccessToken(nextSession.accessToken);
       setSession(nextSession.user);
       setStatus('authenticated');
@@ -24,9 +27,16 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     let active = true;
+    const waitingTimer = setTimeout(() => {
+      if (active) setBootstrapWaiting(true);
+    }, 4_000);
     refreshSession()
       .then((restored) => {
-        if (active) acceptSession(restored);
+        if (active) {
+          clearTimeout(waitingTimer);
+          setBootstrapWaiting(false);
+          acceptSession(restored);
+        }
       })
       .catch((error) => {
         if (active) {
@@ -36,12 +46,14 @@ export function AuthProvider({ children }) {
       });
     return () => {
       active = false;
+      clearTimeout(waitingTimer);
     };
   }, [acceptSession]);
 
   useEffect(() => {
     const expire = () => {
       clearAccessToken();
+      queryClient.clear();
       setSession(null);
       setStatus('anonymous');
     };
@@ -50,6 +62,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = useCallback(async (email, password) => {
+    queryClient.clear();
     const nextSession = await apiJson('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password })
@@ -58,6 +71,7 @@ export function AuthProvider({ children }) {
   }, [acceptSession]);
 
   const register = useCallback(async ({ name, email, password }) => {
+    queryClient.clear();
     const nextSession = await apiJson('/api/auth/register', {
       method: 'POST',
       body: JSON.stringify({
@@ -83,6 +97,7 @@ export function AuthProvider({ children }) {
     } finally {
       clearCachedUserData();
       acceptSession(null);
+      queryClient.clear();
     }
   }, [acceptSession]);
 
@@ -90,11 +105,12 @@ export function AuthProvider({ children }) {
     user: session,
     status,
     bootstrapError,
+    bootstrapWaiting,
     login,
     register,
     logout,
     updateUser
-  }), [session, status, bootstrapError, login, register, logout, updateUser]);
+  }), [session, status, bootstrapError, bootstrapWaiting, login, register, logout, updateUser]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

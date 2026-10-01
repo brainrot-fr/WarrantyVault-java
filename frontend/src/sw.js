@@ -5,7 +5,7 @@ const IMAGE_CACHE_PREFIX = 'wv-image-';
 const OCR_CACHE = 'wv-tesseract-v1';
 const MAX_IMAGE_ENTRIES = 50;
 const MAX_API_AGE = 24 * 60 * 60 * 1000;
-const PRECACHE_URLS = self.__WB_MANIFEST.map((entry) => entry.url);
+const PRECACHE_URLS = [...new Set(self.__WB_MANIFEST.map((entry) => entry.url))];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(PRECACHE).then((cache) => cache.addAll(PRECACHE_URLS)));

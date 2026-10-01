@@ -45,7 +45,7 @@ class AuthServiceTest {
         });
         MockHttpServletResponse response = new MockHttpServletResponse();
 
-        service.issueRefreshToken(user(), response);
+        service.issueRefreshToken(user(), response, "Test browser");
 
         String rawToken = cookieValue(response);
         assertNotNull(rawToken);
@@ -54,8 +54,9 @@ class AuthServiceTest {
         assertNotEquals(rawToken, savedTokens.getFirst().getTokenHash());
         String cookie = response.getHeader("Set-Cookie");
         org.junit.jupiter.api.Assertions.assertTrue(cookie.contains("HttpOnly"));
-        org.junit.jupiter.api.Assertions.assertTrue(cookie.contains("Path=/api/auth"));
+        org.junit.jupiter.api.Assertions.assertTrue(cookie.contains("Path=/api"));
         org.junit.jupiter.api.Assertions.assertTrue(cookie.contains("SameSite=Lax"));
+        assertEquals("Test browser", savedTokens.getFirst().getUserAgent());
     }
 
     @Test
@@ -75,6 +76,24 @@ class AuthServiceTest {
         assertEquals(Instant.parse("2025-01-01T00:00:00Z"), previous.getRevokedAt());
         assertNotNull(previous.getReplacedBy());
         verify(tokenRepository).save(previous);
+    }
+
+    @Test
+    void repeatsRecentRefreshRotationDuringGraceWindowWithoutRevokingFamily() {
+        String rawToken = "previous-opaque-token";
+        RefreshToken previous = token("previous-id", "family-id", rawToken);
+        when(tokenRepository.findByTokenHashForUpdate(service.sha256(rawToken))).thenReturn(Optional.of(previous));
+        when(tokenRepository.save(any(RefreshToken.class))).thenAnswer(call -> call.getArgument(0));
+        MockHttpServletResponse firstResponse = new MockHttpServletResponse();
+        service.refreshSession(rawToken, firstResponse);
+        String replacement = cookieValue(firstResponse);
+
+        MockHttpServletResponse replayResponse = new MockHttpServletResponse();
+        User replayedUser = service.refreshSession(rawToken, replayResponse);
+
+        assertEquals(user().getId(), replayedUser.getId());
+        assertEquals(replacement, cookieValue(replayResponse));
+        org.mockito.Mockito.verify(tokenRepository, org.mockito.Mockito.never()).findByFamilyId("family-id");
     }
 
     @Test

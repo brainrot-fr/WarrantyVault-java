@@ -35,23 +35,28 @@ The local-only seeder creates sample data when the users table is empty:
 
 | Email | Password | Access |
 | --- | --- | --- |
-| `demo@warrantyvault.local` | `Password123!` | Owner of Home and Farmhouse |
-| `family@warrantyvault.local` | `Password123!` | Viewer in Home; pending Farmhouse Editor invitation |
+| `demo@warrantyvault.local` | `Password123` followed by Unicode U+0021 | Owner of Home and Farmhouse |
+| `family@warrantyvault.local` | `Password123` followed by Unicode U+0021 | Viewer in Home; pending Farmhouse Editor invitation |
 
-The eight generated product records cover active, expiring-soon (10 and 25 days out), and expired warranties. Their placeholder bills are generated as valid PNGs at startup; no sample binaries are committed. The demo owner has a 30-day reminder threshold. Local invitation mail and reminder digests print to the backend console.
+The eight generated product records cover active, expiring-soon (10 and 25 days out), and expired warranties. Their sample bills are generated as valid PNGs at startup; no sample binaries are committed. The demo owner has a 30-day reminder threshold. Local invitation mail and reminder digests print to the backend console.
 
 Use a newly registered account to test a clean vault. A developer can create Spaces, upload product bills and optional warranty cards, edit product details, use local OCR suggestions, invite another registered or not-yet-registered email, accept/decline invitations, and change reminder preferences. OCR is advisory; the user always reviews the suggested values and can skip it.
 
 ## Run reminders and test dates
 
-The Settings screen shows **Developer tools → Run reminder check now** only in local mode. It runs synchronously and prints a digest in the backend console. The local-only endpoint accepts a chosen `asOf` date, which is useful for repeatable time-travel checks without changing the computer clock. For example, log in through `POST /api/auth/login`, copy its `accessToken`, then run:
+The Settings screen shows **Developer tools → Run reminder check now** only in local mode. It runs synchronously and prints a digest in the backend console. The local-only endpoint accepts a chosen `asOf` date, which is useful for repeatable time-travel checks without changing the computer clock. For example, get a token by logging in with `POST /api/auth/login`:
 
 ```sh
-curl -fsS -X POST 'http://localhost:8080/api/dev/reminders/run?asOf=2026-09-30' \
-  -H 'Authorization: Bearer ACCESS_TOKEN'
+curl -fsS -X POST 'http://localhost:8080/api/auth/login' \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"demo@warrantyvault.local","password":"Password123\u0021"}'
 ```
 
-Replace `ACCESS_TOKEN` with the access token returned by the login response. The command returns a summary containing `usersNotified`, `productsReminded`, `failedUsers`, and the run `status`; the complete email body is printed by `ConsoleMailService`. The `asOf` override changes the date used by that run only. Without it, warranty status uses the user’s timezone and configured reminder threshold. Production has no `/api/dev/**` endpoint.
+Use the returned `accessToken` as a bearer credential to send `POST` to `http://localhost:8080/api/dev/reminders/run?asOf=2026-09-30&reset=true`.
+
+The response contains `usersNotified`, `productsReminded`, `failedUsers`, and the run `status`; the complete email body is printed by `ConsoleMailService`. The `asOf` override changes the date used by that run only. Without it, warranty status uses the user’s timezone and configured reminder threshold. Production has no `/api/dev/**` endpoint.
+
+The optional `reset=true` query parameter clears reminder logs before rerunning the check. This is useful for repeating a test against the same eligible product and is available only in the local profile. Do not use it as a routine production operation.
 
 ## Local infrastructure and files
 
@@ -65,4 +70,4 @@ Replace `ACCESS_TOKEN` with the access token returned by the login response. The
 
 ## Offline preparation
 
-An offline first install requires Java and npm dependency caches to be warmed while connected. The Tesseract worker, core WASM, and English language data are copied into `frontend/public/tesseract/` by the frontend asset script; keep those local files for disconnected rebuilds. The PWA precaches the app shell and OCR files after install, stores authenticated non-image GET responses in per-user caches for up to 24 hours, and caps the per-user image cache at 50 entries. Auth routes and mutations are never cached. Cached reads are device-local and are cleared on logout; offline writes are intentionally unsupported. Product creation and changes remain disabled until connectivity returns.
+An offline first install requires Java and npm dependency caches to be warmed while connected. The Tesseract worker, core WASM, and English language data are copied into `frontend/public/tesseract/` by the frontend asset script; keep those local files for disconnected rebuilds. The PWA precaches the app shell and OCR files after install. Authenticated API data is not documented as available offline until the PWA caching behavior has been verified. Offline writes are unsupported, and product creation and changes remain disabled until connectivity returns.

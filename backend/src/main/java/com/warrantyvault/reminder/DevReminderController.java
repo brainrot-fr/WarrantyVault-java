@@ -22,7 +22,8 @@ public class DevReminderController {
     }
 
     @PostMapping("/run")
-    public ReminderService.RunSummary run(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf) {
-        return reminderService.run(clock, "DEV", asOf);
+    public ReminderService.RunSummary run(@RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOf,
+                                          @RequestParam(defaultValue = "false") boolean reset) {
+        return reminderService.run(clock, "DEV", asOf, reset);
     }
 }

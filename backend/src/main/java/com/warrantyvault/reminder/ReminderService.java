@@ -6,7 +6,6 @@ import com.warrantyvault.mail.MailService;
 import com.warrantyvault.product.Product;
 import com.warrantyvault.product.ProductRepository;
 import com.warrantyvault.space.Space;
-import com.warrantyvault.space.SpaceRepository;
 import com.warrantyvault.user.NotificationPreference;
 import com.warrantyvault.user.NotificationPreferenceRepository;
 import com.warrantyvault.user.User;
@@ -34,7 +33,6 @@ public class ReminderService {
     private static final int USER_PAGE_SIZE = 100;
     private final UserRepository userRepository;
     private final NotificationPreferenceRepository preferenceRepository;
-    private final SpaceRepository spaceRepository;
     private final ProductRepository productRepository;
     private final ReminderLogRepository reminderLogRepository;
     private final ReminderRunRepository reminderRunRepository;
@@ -45,13 +43,12 @@ public class ReminderService {
     private final AtomicBoolean running = new AtomicBoolean();
 
     public ReminderService(UserRepository userRepository, NotificationPreferenceRepository preferenceRepository,
-                           SpaceRepository spaceRepository, ProductRepository productRepository,
+                           ProductRepository productRepository,
                            ReminderLogRepository reminderLogRepository, ReminderRunRepository reminderRunRepository,
                            MailService mailService, AppProperties appProperties, Clock clock,
                            @org.springframework.beans.factory.annotation.Qualifier("reminderExecutor") Executor reminderExecutor) {
         this.userRepository = userRepository;
         this.preferenceRepository = preferenceRepository;
-        this.spaceRepository = spaceRepository;
         this.productRepository = productRepository;
         this.reminderLogRepository = reminderLogRepository;
         this.reminderRunRepository = reminderRunRepository;
@@ -67,7 +64,7 @@ public class ReminderService {
         try {
             reminderExecutor.execute(() -> {
                 try {
-                    execute(run.getId(), clock, null);
+                    execute(run.getId(), clock, null, false);
                 } finally {
                     running.set(false);
                 }
@@ -82,12 +79,17 @@ public class ReminderService {
 
     public RunSummary run(Clock runClock, String source) {
         ReminderRun run = newRun(source);
-        return execute(run.getId(), runClock, null);
+        return execute(run.getId(), runClock, null, false);
     }
 
     public RunSummary run(Clock runClock, String source, LocalDate asOf) {
         ReminderRun run = newRun(source);
-        return execute(run.getId(), runClock, asOf);
+        return execute(run.getId(), runClock, asOf, false);
+    }
+
+    public RunSummary run(Clock runClock, String source, LocalDate asOf, boolean resetLogs) {
+        ReminderRun run = newRun(source);
+        return execute(run.getId(), runClock, asOf, resetLogs);
     }
 
     private ReminderRun newRun(String source) {
@@ -101,12 +103,13 @@ public class ReminderService {
         return reminderRunRepository.save(run);
     }
 
-    private RunSummary execute(String runId, Clock runClock, LocalDate forcedToday) {
+    private RunSummary execute(String runId, Clock runClock, LocalDate forcedToday, boolean resetLogs) {
         ReminderRun run = reminderRunRepository.findById(runId).orElseThrow();
         int usersNotified = 0;
         int productsReminded = 0;
         int failedUsers = 0;
         try {
+            if (resetLogs) reminderLogRepository.deleteAllInBatch();
             int pageNumber = 0;
             Page<User> page;
             do {
@@ -156,15 +159,8 @@ public class ReminderService {
 
     private List<DueProduct> dueProducts(User user, LocalDate today, int daysBefore) {
         LocalDate lastCoveredDay = today.plusDays(daysBefore);
-        List<DueProduct> due = new ArrayList<>();
-        for (Space space : spaceRepository.findByUserId(user.getId())) {
-            for (Product product : productRepository.findBySpace(space)) {
-                LocalDate expiresOn = product.getExpiresOn();
-                if (expiresOn.isBefore(today) || expiresOn.isAfter(lastCoveredDay)) continue;
-                if (reminderLogRepository.existsByUserAndProductAndExpiresOn(user, product, expiresOn)) continue;
-                due.add(new DueProduct(space, product));
-            }
-        }
+        List<DueProduct> due = new ArrayList<>(productRepository.findUnloggedReminderProducts(user.getId(), today, lastCoveredDay)
+            .stream().map(product -> new DueProduct(product.getSpace(), product)).toList());
         due.sort(Comparator.comparing((DueProduct item) -> item.product().getExpiresOn())
             .thenComparing(item -> item.product().getProductType(), String.CASE_INSENSITIVE_ORDER));
         return due;
@@ -172,14 +168,14 @@ public class ReminderService {
 
     private void sendDigest(User user, LocalDate today, List<DueProduct> dueProducts) {
         int count = dueProducts.size();
-        String subject = count + " warranty(ies) ending soon";
+        String subject = count == 1 ? "1 warranty ends soon" : count + " warranties end soon";
         String link = appProperties.getAppBaseUrl() + "/dashboard";
         StringBuilder plain = new StringBuilder("Here are the warranties ending soon:\n\n");
         StringBuilder rows = new StringBuilder();
         for (DueProduct item : dueProducts) {
             Product product = item.product();
             long days = ChronoUnit.DAYS.between(today, product.getExpiresOn());
-            String label = product.getProductType() + " · " + product.getBrand() + " — " + item.space().getName();
+            String label = product.getProductType() + " · " + product.getBrand() + " · " + item.space().getName();
             plain.append(label).append("; expires ").append(product.getExpiresOn()).append("; ")
                 .append(days).append(days == 1 ? " day left\n" : " days left\n");
             rows.append("<li style=\"padding:12px 0;border-bottom:1px solid #dddddd\"><strong>")
@@ -190,8 +186,8 @@ public class ReminderService {
         }
         plain.append("\nOpen your dashboard: ").append(link);
         String html = "<div style=\"font:16px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#263238;max-width:600px;margin:auto\">"
-            + "<h1 style=\"font:400 28px/1.2 Georgia,serif\">Warranty reminder</h1>"
-            + "<p>" + count + (count == 1 ? " warranty is" : " warranties are") + " approaching their end date.</p>"
+            + "<h1 style=\"font:400 28px/1.2 Georgia,serif\">" + escape(subject) + "</h1>"
+            + "<p>" + subject + ".</p>"
             + "<ul style=\"list-style:none;padding:0;margin:20px 0\">" + rows + "</ul>"
             + "<p><a href=\"" + escape(link) + "\" style=\"display:inline-block;background:#516b58;color:#fff;padding:12px 18px;text-decoration:none;border-radius:8px\">Open WarrantyVault</a></p>"
             + "</div>";

@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState } from 'react';
+import { forwardRef, useEffect, useId, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'motion/react';
+import { CircleAlert } from 'lucide-react';
 import { cn } from '@/lib/cn.js';
+import { apiRequest } from '@/lib/api.js';
+import { formatDate } from '@/lib/formatters.js';
+
+export const FormStack = forwardRef(function FormStack({ children, className = '', ...props }, ref) {
+  return <form noValidate className={cn('form-stack', className)} ref={ref} {...props}>{children}</form>;
+});
 
 export function Region({ as: Element = 'section', children, className = '', aside = false, ...props }) {
   return <Element className={cn(aside ? 'layout-aside' : 'layout-region', className)} {...props}>{children}</Element>;
@@ -92,14 +99,216 @@ export function Section({ title, children, action, className = '' }) {
   );
 }
 
-export function Field({ label, hint, error, children, className = '' }) {
-  const errorId = error ? `field-error-${String(label).toLowerCase().replace(/[^a-z0-9]+/g, '-')}` : undefined;
+export function Field({ label, hint, error, optional = false, children, className = '', as: Control = 'input', id: suppliedId, ...controlProps }) {
+  const generatedId = useId().replaceAll(':', '');
+  const id = suppliedId || `field-${generatedId}`;
+  const hintId = hint ? `${id}-hint` : undefined;
+  const errorId = error ? `${id}-error` : undefined;
+  const describedBy = [controlProps['aria-describedby'], hintId, errorId].filter(Boolean).join(' ') || undefined;
+  const inputProps = {
+    ...controlProps,
+    id,
+    'aria-describedby': describedBy,
+    'aria-invalid': error ? 'true' : controlProps['aria-invalid']
+  };
   return (
-    <label className={cn('field', className)}>
-      <span>{label}{hint ? <small>{hint}</small> : null}</span>
-      {children(errorId)}
-      {error ? <small className="form-error" id={errorId} role="alert">{error}</small> : null}
+    <div className={cn('field', className)}>
+      <label htmlFor={id}>{label}{optional ? <> <span className="optional-label">(optional)</span></> : null}</label>
+      {hint ? <small id={hintId}>{hint}</small> : null}
+      {typeof children === 'function' ? children(inputProps) : <Control {...inputProps}>{children}</Control>}
+      {error ? <small className="form-error" id={errorId} role="alert"><CircleAlert aria-hidden="true" size={15} /><span>{error}</span></small> : null}
+    </div>
+  );
+}
+
+export function SwitchControl({ checked, disabled = false, label, onChange, name }) {
+  return (
+    <label className={`switch-control${disabled ? ' is-disabled' : ''}`}>
+      <span>{label}</span>
+      <input checked={checked} disabled={disabled} name={name} onChange={onChange} role="switch" type="checkbox" />
+      <span className="switch-track" aria-hidden="true"><span /></span>
     </label>
+  );
+}
+
+export function FreeTextCombobox({ id, label, name, value, onChange, onBlur, inputRef, ref, options = [], error, placeholder, maxLength = 60 }) {
+  const controlRef = inputRef || ref;
+  const generatedId = useId().replaceAll(':', '');
+  const inputId = id || `combobox-${generatedId}`;
+  const listId = `${inputId}-options`;
+  const errorId = error ? `${inputId}-error` : undefined;
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const normalizedValue = String(value || '');
+  const matches = [...new Set(options.filter((option) => typeof option === 'string' && option.trim()))]
+    .filter((option) => option.toLocaleLowerCase().includes(normalizedValue.trim().toLocaleLowerCase()))
+    .slice(0, 8);
+  const hasExactMatch = options.some((option) => typeof option === 'string'
+    && option.toLocaleLowerCase() === normalizedValue.trim().toLocaleLowerCase());
+  const choices = [
+    ...matches.map((option) => ({ label: option, value: option, custom: false })),
+    ...(normalizedValue.trim() && !hasExactMatch
+      ? [{ label: `Use "${normalizedValue.trim()}"`, value: normalizedValue.trim(), custom: true }]
+      : [])
+  ];
+  const select = (nextValue) => {
+    onChange({ target: { name, value: nextValue } });
+    setOpen(false);
+    setActiveIndex(-1);
+  };
+  const handleKeyDown = (event) => {
+    if (event.key === 'ArrowDown' && choices.length) {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((current) => (current + 1) % choices.length);
+    } else if (event.key === 'ArrowUp' && choices.length) {
+      event.preventDefault();
+      setOpen(true);
+      setActiveIndex((current) => (current <= 0 ? choices.length - 1 : current - 1));
+    } else if (event.key === 'Enter' && open && activeIndex >= 0) {
+      event.preventDefault();
+      select(choices[activeIndex].value);
+    } else if (event.key === 'Escape') {
+      setOpen(false);
+      setActiveIndex(-1);
+    }
+  };
+  return (
+    <div className="combobox">
+      <label htmlFor={inputId}>{label}</label>
+      <input
+        aria-activedescendant={open && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
+        aria-autocomplete="list"
+        aria-controls={listId}
+        aria-describedby={errorId}
+        aria-expanded={open && choices.length > 0}
+        aria-invalid={error ? 'true' : undefined}
+        autoComplete="off"
+        id={inputId}
+        maxLength={maxLength}
+        name={name}
+        onBlur={(event) => {
+          onBlur?.(event);
+          window.setTimeout(() => setOpen(false), 100);
+        }}
+        onChange={(event) => {
+          onChange(event);
+          setOpen(true);
+          setActiveIndex(-1);
+        }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={handleKeyDown}
+        placeholder={placeholder}
+        ref={controlRef}
+        role="combobox"
+        value={normalizedValue}
+      />
+      {open && choices.length ? (
+        <ul className="combobox-options" id={listId} role="listbox" aria-label={`${label} suggestions`}>
+          {choices.map((option, index) => (
+            <li
+              aria-selected={activeIndex === index}
+              className={activeIndex === index ? 'active' : ''}
+              id={`${listId}-${index}`}
+              key={`${option.value}-${option.custom}`}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => select(option.value)}
+              role="option"
+            >{option.label}</li>
+          ))}
+        </ul>
+      ) : null}
+      {error ? <small className="form-error" id={errorId} role="alert"><CircleAlert aria-hidden="true" size={15} /><span>{error}</span></small> : null}
+    </div>
+  );
+}
+
+function fileSize(size) {
+  if (size < 1024 * 1024) return `${Math.max(1, Math.round(size / 1024))} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function ImagePicker({ label, hint, file, current = false, currentLabel = 'Current image saved', currentSize, currentProductId, currentImageType, optional = false, onSelect, onRemove, error, fieldName, accept = 'image/jpeg,image/png,image/webp', camera = true }) {
+  const pickerId = useId().replaceAll(':', '');
+  const errorId = error ? `${pickerId}-error` : undefined;
+  const browseRef = useRef(null);
+  const cameraRef = useRef(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const [currentPreviewUrl, setCurrentPreviewUrl] = useState('');
+  const [currentPreviewError, setCurrentPreviewError] = useState('');
+  useEffect(() => {
+    if (!file || typeof URL.createObjectURL !== 'function') {
+      setPreviewUrl('');
+      return undefined;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+  useEffect(() => {
+    if (!current || !currentProductId || !currentImageType) {
+      setCurrentPreviewUrl('');
+      setCurrentPreviewError('');
+      return undefined;
+    }
+    let active = true;
+    let objectUrl = '';
+    setCurrentPreviewUrl('');
+    setCurrentPreviewError('');
+    apiRequest(`/api/products/${currentProductId}/images/${currentImageType}`)
+      .then((response) => response.blob())
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setCurrentPreviewUrl(objectUrl);
+      })
+      .catch(() => {
+        if (active) setCurrentPreviewError('The saved image preview could not be loaded.');
+      });
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [current, currentImageType, currentProductId]);
+  const pick = (event) => {
+    const selected = event.target.files?.[0];
+    event.target.value = '';
+    if (selected) onSelect(selected);
+  };
+  return (
+    <div className="field image-picker">
+      <span className="field-label">{label}{optional ? <> <span className="optional-label">(optional)</span></> : null}</span>
+      {hint ? <small>{hint}</small> : null}
+      <input accept={accept} aria-describedby={errorId} aria-invalid={error ? 'true' : undefined} aria-label={`${label} file`} className="sr-only" id={`${pickerId}-browse`} onChange={pick} ref={browseRef} tabIndex="-1" type="file" />
+      {camera ? <input accept={accept} aria-describedby={errorId} aria-invalid={error ? 'true' : undefined} aria-label={`${label} camera`} capture="environment" className="sr-only" id={`${pickerId}-camera`} onChange={pick} ref={cameraRef} tabIndex="-1" type="file" /> : null}
+      {file ? (
+        <div className="image-picker-preview">
+          {previewUrl ? <img src={previewUrl} alt={`Selected ${label.toLowerCase()} thumbnail`} /> : null}
+          <span className="image-picker-file"><strong>{file.name}</strong><small>{fileSize(file.size)}</small></span>
+          <div className="image-picker-actions">
+            {camera ? <button className="text-button" onClick={() => cameraRef.current?.click()} type="button">Take another</button> : null}
+            <button className="text-button" onClick={() => browseRef.current?.click()} type="button">Replace</button>
+            <button className="text-button remove-link" onClick={onRemove} type="button">Remove</button>
+          </div>
+        </div>
+      ) : current ? (
+        <div className="image-picker-current">
+          {currentPreviewUrl ? <img src={currentPreviewUrl} alt={`Current ${label.toLowerCase()} thumbnail`} /> : <span className="image-picker-thumbnail-placeholder" aria-hidden="true" />}
+          <span className="image-picker-saved-meta"><strong>{currentLabel}</strong>{currentSize ? <small>{fileSize(currentSize)}</small> : null}</span>
+          {currentPreviewError ? <small className="field-hint" role="status">{currentPreviewError}</small> : null}
+          <div className="image-picker-actions">
+            {camera ? <button className="text-button" onClick={() => cameraRef.current?.click()} type="button">Take photo</button> : null}
+            <button className="text-button" onClick={() => browseRef.current?.click()} type="button">Replace</button>
+          </div>
+        </div>
+      ) : (
+        <div className="image-picker-empty">
+          {camera ? <button aria-describedby={errorId} aria-invalid={error ? 'true' : undefined} className="button button-quiet" name={fieldName ? `${fieldName}Picker` : undefined} onClick={() => cameraRef.current?.click()} type="button">Take a photo</button> : null}
+          <button aria-describedby={errorId} aria-invalid={error ? 'true' : undefined} className="button button-quiet" name={fieldName ? `${fieldName}Picker` : undefined} onClick={() => browseRef.current?.click()} type="button">Choose a photo</button>
+        </div>
+      )}
+      {error ? <small className="form-error" id={errorId} role="alert"><CircleAlert aria-hidden="true" size={15} /><span>{error}</span></small> : null}
+    </div>
   );
 }
 
@@ -151,7 +360,7 @@ export function KeyValue({ rows }) {
   return (
     <dl className="key-value-list">
       {rows.map(({ label, value }) => (
-        <div key={label}><dt>{label}</dt><dd>{value || '—'}</dd></div>
+        <div key={label}><dt>{label}</dt><dd>{value === null || value === undefined || value === '' ? 'Not set' : value}</dd></div>
       ))}
     </dl>
   );
@@ -160,15 +369,17 @@ export function KeyValue({ rows }) {
 export function WarrantyLine({ purchasedOn, expiresOn, progress = 0, status = 'ACTIVE' }) {
   const reducedMotion = useReducedMotion();
   const elapsed = `${Math.round(Math.min(1, Math.max(0, progress)) * 100)}%`;
+  const formattedPurchasedOn = formatDate(purchasedOn);
+  const formattedExpiresOn = formatDate(expiresOn);
   return (
-    <div className="warranty-line" aria-label={`Purchased ${purchasedOn}; coverage ends ${expiresOn}`}>
+    <div className="warranty-line" aria-label={`Purchased ${formattedPurchasedOn}; coverage ends ${formattedExpiresOn}`}>
       <div className="warranty-track">
         <i aria-hidden="true" className="warranty-start" />
         <motion.span className={`warranty-progress status-${status.toLowerCase().replaceAll('_', '-')}`} initial={reducedMotion ? false : { width: 0 }} animate={{ width: elapsed }} transition={{ duration: reducedMotion ? 0 : 0.5, ease: 'easeOut' }} />
         <i aria-label="Today" className="warranty-today" style={{ left: elapsed }} />
         <i aria-hidden="true" className="warranty-end" />
       </div>
-      <div className="warranty-labels"><span>Purchased {purchasedOn}</span><span className="warranty-today-label" style={{ left: elapsed }}>Today</span><span>Expires {expiresOn}</span></div>
+      <div className="warranty-labels"><span>Purchased {formattedPurchasedOn}</span><span className="warranty-today-label" style={{ left: elapsed }}>Today</span><span>Expires {formattedExpiresOn}</span></div>
     </div>
   );
 }

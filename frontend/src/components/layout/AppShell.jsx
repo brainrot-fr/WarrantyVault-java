@@ -35,7 +35,7 @@ export function AppShell({ children, title, actions, publicPage = false }) {
   } = useRegisterSW({ immediate: true });
   const isIosSafari = /iphone|ipad|ipod/i.test(navigator.userAgent) && !/crios|fxios|edgios/i.test(navigator.userAgent);
   const spacesQuery = useQuery({
-    queryKey: ['spaces'],
+    queryKey: ['spaces', user?.id],
     queryFn: () => apiJson('/api/spaces'),
     enabled: Boolean(user),
     staleTime: 60_000
@@ -88,8 +88,12 @@ export function AppShell({ children, title, actions, publicPage = false }) {
       toast.error('Connect to add a product.');
       return;
     }
+    if (!spaces.length) {
+      navigate('/spaces?create=1&add=1');
+      return;
+    }
     if (!canAddSpaces.length) {
-      toast.error('Create a Space or ask an owner for editor access before adding products.');
+      toast.error('Ask a Space owner for editor access before adding products.');
       return;
     }
     const preferred = canAddSpaces.find((space) => space.id === selectedSpaceId) || canAddSpaces[0];
@@ -100,7 +104,7 @@ export function AppShell({ children, title, actions, publicPage = false }) {
     }
     setChosenSpaceId('');
     setAddOpen(true);
-  }, [online, canAddSpaces, selectedSpaceId]);
+  }, [online, spaces.length, canAddSpaces, selectedSpaceId, navigate]);
 
   useEffect(() => {
     const open = () => openAddFlow();

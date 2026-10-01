@@ -45,6 +45,14 @@ describe('parseBill', () => {
       expected: { amount: '12999', brand: 'Sony', productType: 'Television' }
     },
     {
+      text: 'MRP: ₹ 50,000\nSub Total: ₹ 45,000\nDiscount: ₹ 5,000\nTotal: ₹ 40,000',
+      expected: { amount: '40000' }
+    },
+    {
+      text: 'MRP: ₹ 50,000\nSubtotal: ₹ 45,000\nDiscount: ₹ 5,000',
+      expected: { amount: '50000' }
+    },
+    {
       text: 'Date: 01/04/2023\nTotal 9999.99\nPanasonic Microwave Oven',
       expected: { purchaseDate: '2023-04-01', amount: '9999.99', brand: 'Panasonic', productType: 'Microwave' }
     },
@@ -91,5 +99,31 @@ describe('parseBill', () => {
     expect(new Set(PRODUCT_TYPE_DICTIONARY.map(([type]) => type)).size).toBeGreaterThanOrEqual(60);
     expect(parseBill('ACME invoice; double door fridge').productType).toBe('Refrigerator');
     expect(parseBill('BOSCH 2 years comprehensive warranty').warrantyMonths).toBe('24');
+  });
+
+  it('deduplicates dictionary labels and matches the most specific overlapping brand', () => {
+    for (const dictionary of [BRAND_DICTIONARY, PRODUCT_TYPE_DICTIONARY]) {
+      const normalizedLabels = dictionary.map(([label]) => label.toLowerCase().replace(/[^a-z0-9]/g, ''));
+      expect(new Set(normalizedLabels).size).toBe(normalizedLabels.length);
+      expect(dictionary.every(([, variants]) => (
+        new Set(variants.map((variant) => variant.trim().toLowerCase())).size === variants.length
+      ))).toBe(true);
+    }
+    expect(parseBill('Godrej Interio chair').brand).toBe('Godrej Interio');
+  });
+
+  it('does not detect a brand embedded inside an unrelated word', () => {
+    expect(parseBill('Bulgarian-made appliance with a one-year warranty').brand).toBe('');
+  });
+
+  it('chooses the first whole brand mention when a receipt names multiple brands', () => {
+    expect(parseBill('Bosch vacuum, compatible with Samsung accessories').brand).toBe('Bosch');
+  });
+
+  it('requires contextual or capitalized evidence for the ambiguous Nothing brand', () => {
+    expect(parseBill('Nothing to declare').brand).toBe('');
+    expect(parseBill('brand: nothing').brand).toBe('Nothing');
+    expect(parseBill('NOTHING phone').brand).toBe('Nothing');
+    expect(parseBill('Nothing Phone (2a)').brand).toBe('Nothing');
   });
 });
