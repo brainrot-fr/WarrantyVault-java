@@ -120,6 +120,10 @@
 .list-refreshing { opacity: .58; transition: opacity 160ms ease; }
 .first-run { display: grid; gap: 1.5rem; max-width: 34rem; padding-block: 2rem; }
 .first-run ol { display: grid; gap: .75rem; margin: 0; padding-left: 1.5rem; }
+.space-explainer { display: grid; gap: .35rem; max-width: 34rem; border-top: 1px solid var(--hairline); padding-top: 1rem; }
+.space-explainer h2 { margin: 0; font-size: 1rem; }
+.space-explainer p { max-width: 36rem; margin: 0; color: var(--ink-muted); line-height: 1.6; }
+.document-privacy-hint { max-width: 38rem; margin: .6rem 0 0; color: var(--ink-muted); font-size: .82rem; line-height: 1.6; }
 .line-item {
   min-height: 78px;
   display: flex;

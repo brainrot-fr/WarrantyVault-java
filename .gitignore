@@ -9,3 +9,11 @@ backend/data/
 backend/uploads/
 backend/local.log
 .DS_Store
+SETUP.md
+frontend/android/.gradle/
+frontend/android/local.properties
+frontend/android/**/build/
+frontend/android/app/*.jks
+frontend/android/app/*.keystore
+warrantyvault-release.jks
+ANDROID_RELEASE.md

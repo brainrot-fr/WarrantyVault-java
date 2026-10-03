@@ -340,6 +340,10 @@ export function DashboardPage() {
                     <li>Add a bill and its warranty period.</li>
                     <li>We email you before the warranty ends.</li>
                   </ol>
+                  <div className="space-explainer">
+                    <h2>What are Spaces?</h2>
+                    <p>A Space a place, such as Home or an office, where you buy prodcucts for. You choose who can access each Space.</p>
+                  </div>
                   <button className="button button-primary" disabled={!online} onClick={() => navigate('/spaces?create=1&add=1')} type="button">Create your first Space</button>
                 </section>
               ) : !hasAnyProducts ? (
@@ -1308,13 +1312,14 @@ export function ProductForm({ spaceId, productId, onSaved }) {
             currentSize={productQuery.data?.bill?.sizeBytes}
             fieldName="bill"
             file={billFile}
-            hint={productId ? 'Replace the current bill if you have a clearer copy.' : 'Required. JPEG, PNG, or WebP. Image processing and text recognition stay on this device.'}
+            hint={productId ? 'Replace the current bill if you have a clearer copy.' : 'Required. JPEG, PNG, or WebP. Text recognition runs on this device.'}
             label="Purchase bill"
             optional={Boolean(productId)}
             error={billFileError}
             onSelect={prepareBill}
             onRemove={() => { cancelOcr(); setOcrStatus('idle'); setBillFile(null); setBillPreview(''); setDirty(true); }}
           />
+          <p className="document-privacy-hint">When you save, documents are stored with this product for your records. They are not public; only you and people with access to this Space can view them.</p>
           {ocrStatus === 'reading' ? (
             <div className="ocr-progress" aria-live="polite">
               <label htmlFor="bill-reading-progress">Reading bill · {Math.round(ocrProgress * 100)}%</label>
