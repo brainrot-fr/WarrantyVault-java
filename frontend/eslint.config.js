@@ -5,7 +5,7 @@ import reactRefresh from 'eslint-plugin-react-refresh';
 
 export default [
   {
-    ignores: ['public/tesseract/**', 'public/icons/**', 'dist/**', 'node_modules/**']
+    ignores: ['public/tesseract/**', 'public/icons/**', 'dist/**', 'android/**', 'node_modules/**']
   },
   js.configs.recommended,
   {
