@@ -51,12 +51,8 @@ public class SecurityConfig {
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers(HttpMethod.GET, "/api/health", "/api/meta/config").permitAll()
                 .requestMatchers(HttpMethod.POST, "/api/auth/register", "/api/auth/login", "/api/auth/refresh", "/api/auth/logout").permitAll()
-                .requestMatchers(HttpMethod.GET, "/", "/index.html", "/assets/**", "/icons/**", "/tesseract/**",
-                    "/manifest.webmanifest", "/sw.js", "/registerSW.js", "/favicon.ico", "/favicon.svg",
-                    "/icons.svg", "/*.js", "/*.css",
-                    "/login", "/register", "/dashboard", "/spaces", "/spaces/*", "/spaces/*/products/**",
-                    "/spaces/*/members", "/invitations", "/settings", "/not-found").permitAll()
-                .anyRequest().authenticated())
+                .requestMatchers("/api/**").authenticated()
+                .anyRequest().permitAll())
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterAfter(new RateLimitFilter(environment), JwtAuthenticationFilter.class)
             .headers(headers -> headers.addHeaderWriter(new StaticHeadersWriter("Referrer-Policy", "no-referrer")))

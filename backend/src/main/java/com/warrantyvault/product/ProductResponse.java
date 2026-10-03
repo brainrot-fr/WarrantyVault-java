@@ -30,16 +30,14 @@ public record ProductResponse(
     Instant updatedAt,
     Permissions permissions
 ) {
-    public static final int EXPIRING_SOON_DAYS = 30;
-
     public record FileInfo(String contentType, long sizeBytes) {}
     public record Creator(String id, String name) {}
     public record Permissions(boolean canEdit, boolean canDelete) {}
 
-    public static ProductResponse from(Product product, SpaceRole role, LocalDate today) {
+    public static ProductResponse from(Product product, SpaceRole role, LocalDate today, int expiringSoonDays) {
         long daysRemaining = java.time.temporal.ChronoUnit.DAYS.between(today, product.getExpiresOn());
         String status = daysRemaining < 0 ? "EXPIRED"
-            : daysRemaining <= EXPIRING_SOON_DAYS ? "EXPIRING_SOON" : "ACTIVE";
+            : daysRemaining <= expiringSoonDays ? "EXPIRING_SOON" : "ACTIVE";
         long totalDays = Math.max(1, java.time.temporal.ChronoUnit.DAYS.between(product.getPurchasedOn(), product.getExpiresOn()));
         long elapsedDays = java.time.temporal.ChronoUnit.DAYS.between(product.getPurchasedOn(), today);
         double elapsedFraction = Math.max(0, Math.min(1, elapsedDays / (double) totalDays));

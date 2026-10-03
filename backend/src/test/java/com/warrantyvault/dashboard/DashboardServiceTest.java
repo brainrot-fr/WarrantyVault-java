@@ -8,6 +8,7 @@ import com.warrantyvault.member.SpaceMember;
 import com.warrantyvault.product.Product;
 import com.warrantyvault.product.ProductRepository;
 import com.warrantyvault.product.CurrencyValueTotal;
+import com.warrantyvault.config.AppProperties;
 import com.warrantyvault.space.Space;
 import com.warrantyvault.user.User;
 import java.math.BigDecimal;
@@ -37,7 +38,7 @@ class DashboardServiceTest {
         when(products.findAllForDashboard(user.getId())).thenReturn(List.of(current, expired));
         when(products.findCoveredValueTotals(user.getId(), LocalDate.parse("2026-10-01")))
             .thenReturn(List.of(new CurrencyValueTotal("INR", new BigDecimal("5000.00"))));
-        DashboardService service = new DashboardService(products,
+        DashboardService service = new DashboardService(products, new AppProperties(),
             Clock.fixed(Instant.parse("2026-10-01T12:00:00Z"), ZoneOffset.UTC));
 
         assertEquals("5000.00", service.getDashboard(user).totalCoveredValue().get("INR"));

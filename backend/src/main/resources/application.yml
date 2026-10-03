@@ -25,6 +25,7 @@ logging:
 server:
   port: ${PORT:8080}
 app:
+  expiring-soon-days: 30
   storage:
     local-dir: ./uploads
   jwt-secret: ${JWT_SECRET:dev-secret-key-1234567890-abcdef}

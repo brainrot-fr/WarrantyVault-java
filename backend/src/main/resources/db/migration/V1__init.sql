@@ -90,32 +90,3 @@ CREATE TABLE products (
 );
 CREATE INDEX idx_products_space_expiry ON products(space_id, expires_on);
 CREATE INDEX idx_products_expiry ON products(expires_on);
-
-CREATE TABLE notification_preferences (
-  user_id CHAR(36) NOT NULL PRIMARY KEY,
-  reminders_enabled BOOLEAN NOT NULL DEFAULT TRUE,
-  days_before INT NOT NULL DEFAULT 30,
-  CONSTRAINT fk_notification_preferences_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-);
-
-CREATE TABLE reminder_log (
-  id CHAR(36) NOT NULL PRIMARY KEY,
-  user_id CHAR(36) NOT NULL,
-  product_id CHAR(36) NOT NULL,
-  expires_on DATE NOT NULL,
-  sent_at TIMESTAMP NOT NULL,
-  CONSTRAINT fk_reminder_log_user FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
-  CONSTRAINT fk_reminder_log_product FOREIGN KEY (product_id) REFERENCES products(id) ON DELETE CASCADE,
-  CONSTRAINT uq_reminder_log UNIQUE (user_id, product_id, expires_on)
-);
-
-CREATE TABLE reminder_runs (
-  id CHAR(36) NOT NULL PRIMARY KEY,
-  started_at TIMESTAMP NOT NULL,
-  finished_at TIMESTAMP NULL,
-  trigger_source VARCHAR(20) NOT NULL,
-  users_notified INT NOT NULL DEFAULT 0,
-  products_reminded INT NOT NULL DEFAULT 0,
-  status VARCHAR(10) NOT NULL,
-  error VARCHAR(500) NULL
-);

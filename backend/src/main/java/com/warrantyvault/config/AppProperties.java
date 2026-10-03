@@ -1,6 +1,8 @@
 package com.warrantyvault.config;
 
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
@@ -16,6 +18,7 @@ public class AppProperties {
     private Storage storage = new Storage();
     private Cookie cookie = new Cookie();
     private Integer maxUploadBytes = 10 * 1024 * 1024;
+    @Min(1) @Max(365) private int expiringSoonDays = 30;
 
     @Data
     public static class Storage {

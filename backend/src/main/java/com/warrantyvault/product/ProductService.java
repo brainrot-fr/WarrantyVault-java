@@ -171,7 +171,7 @@ public class ProductService {
         SpaceMember membership = requireMembership(product.getSpace().getId(), userId);
         User user = membership.getUser();
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(user.getTimezone())));
-        return ProductResponse.from(product, membership.getRole(), today);
+        return ProductResponse.from(product, membership.getRole(), today, appProperties.getExpiringSoonDays());
     }
 
     @Transactional(readOnly = true)
@@ -188,7 +188,7 @@ public class ProductService {
         User user = membership.getUser();
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(user.getTimezone())));
         List<ProductResponse> items = productRepository.findBySpaceIdWithResponseDetails(spaceId).stream()
-            .map(product -> ProductResponse.from(product, membership.getRole(), today))
+            .map(product -> ProductResponse.from(product, membership.getRole(), today, appProperties.getExpiringSoonDays()))
             .filter(product -> status == null || status.equals(product.status()))
             .filter(product -> type == null || type.isBlank() || product.productType().equalsIgnoreCase(type))
             .filter(product -> query == null || query.isBlank() || (

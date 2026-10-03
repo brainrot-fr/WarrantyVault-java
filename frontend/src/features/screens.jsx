@@ -828,7 +828,7 @@ export function SpaceMembersPage() {
                   </Field>
                   <p className="invite-role-help">Viewers can see everything. Editors can add and edit products, but cannot delete them or manage people.</p>
                   <ErrorMessage error={invite.error} />
-                  <button className="button button-primary" disabled={!online || invite.isPending} type="submit">{invite.isPending ? 'Sending…' : 'Send invitation'}</button>
+                  <button className="button button-primary" disabled={!online || invite.isPending} type="submit">{invite.isPending ? 'Saving…' : 'Save invitation'}</button>
                   {!online ? <p className="offline-note" role="status">Connect to send invitations or update membership.</p> : null}
                 </FormStack>
                 {(membersQuery.data?.invitations || []).length ? (

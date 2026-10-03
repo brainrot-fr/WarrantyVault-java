@@ -35,6 +35,10 @@ Set these variables on the backend service:
 
 The app fails fast in `prod` when any required variable is missing or invalid. `APP_STORAGE_LOCAL_DIR` optionally overrides the default `/app/uploads` image directory. `COOKIE_SAMESITE` defaults to `Lax`; `COOKIE_DOMAIN` is optional. `APP_BASE_URL` is not needed because invitations are handled in-app and the frontend and API share one origin.
 
+Warranty status uses `app.expiring-soon-days` and defaults to 30 days. Override it with the Spring environment variable `APP_EXPIRING_SOON_DAYS` if the deployment needs a different dashboard attention window.
+
+The baseline Flyway migration is intentionally kept portable for fresh H2 and MySQL databases. If deploying over a database created by an older WarrantyVault build, take a backup and review its Flyway history before startup; changing an already-applied baseline requires the normal Flyway repair/rebaseline procedure for that environment.
+
 ## 5. Frontend delivery
 
 The Docker build includes the production Vite output in the Spring Boot jar. Spring serves the frontend and API from the same Railway service and origin; no separate frontend host or API base URL is required. Client-side application routes are forwarded to the frontend entry point.

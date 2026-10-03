@@ -29,6 +29,8 @@ npm run dev
 
 Open <http://localhost:5173>. In development, the frontend sends API requests to `http://localhost:8080` by default. No environment variables are required. To start both processes together instead, run `make local` from the repository root.
 
+Warranty status uses the configurable `app.expiring-soon-days` property, which defaults to `30` in the local profile. Change it in `backend/src/main/resources/application.yml` when testing a different attention window.
+
 ## Demo accounts
 
 The local profile seeds sample data on a new database:

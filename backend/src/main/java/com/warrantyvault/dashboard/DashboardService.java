@@ -3,7 +3,7 @@ package com.warrantyvault.dashboard;
 import com.warrantyvault.product.Product;
 import com.warrantyvault.product.ProductRepository;
 import com.warrantyvault.product.CurrencyValueTotal;
-import com.warrantyvault.product.ProductResponse;
+import com.warrantyvault.config.AppProperties;
 import com.warrantyvault.user.User;
 import java.math.RoundingMode;
 import java.time.Clock;
@@ -25,10 +25,12 @@ public class DashboardService {
     private static final int RECENTLY_EXPIRED_LIMIT = 20;
 
     private final ProductRepository productRepository;
+    private final AppProperties appProperties;
     private final Clock clock;
 
-    public DashboardService(ProductRepository productRepository, Clock clock) {
+    public DashboardService(ProductRepository productRepository, AppProperties appProperties, Clock clock) {
         this.productRepository = productRepository;
+        this.appProperties = appProperties;
         this.clock = clock;
     }
 
@@ -36,7 +38,7 @@ public class DashboardService {
     public DashboardResponse getDashboard(User user) {
         ZoneId zone = ZoneId.of(user.getTimezone());
         LocalDate today = LocalDate.now(clock.withZone(zone));
-        int thresholdDays = ProductResponse.EXPIRING_SOON_DAYS;
+        int thresholdDays = appProperties.getExpiringSoonDays();
 
         List<Product> products = productRepository.findAllForDashboard(user.getId());
 

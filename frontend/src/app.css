@@ -436,8 +436,6 @@
 .settings-row { min-height: 60px; border-bottom: 1px solid var(--hairline); }
 .custom-days-row { display: flex; align-items: end; gap: var(--space-4); padding: var(--space-4) 0; border-bottom: 1px solid var(--hairline); }
 .custom-days-row .field { width: min(100%, 220px); }
-.developer-tools { margin-top: var(--space-8); padding-top: var(--space-4); }
-.developer-tools .eyebrow { margin-bottom: var(--space-2); }
 .member-actions select { min-height: 48px; }
 .product-filters { grid-template-columns: 2fr 1fr 1fr; gap: var(--space-6); margin: var(--space-8) 0 var(--space-4); }
 .product-filters .field input, .product-filters .field select { min-height: 44px; }

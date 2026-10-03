@@ -2,11 +2,11 @@ package com.warrantyvault.space;
 
 import com.warrantyvault.common.ApiException;
 import com.warrantyvault.common.UuidGenerator;
+import com.warrantyvault.config.AppProperties;
 import com.warrantyvault.member.SpaceMember;
 import com.warrantyvault.member.SpaceMemberRepository;
 import com.warrantyvault.product.Product;
 import com.warrantyvault.product.ProductRepository;
-import com.warrantyvault.product.ProductResponse;
 import com.warrantyvault.storage.StorageService;
 import com.warrantyvault.user.User;
 import com.warrantyvault.user.UserRepository;
@@ -31,16 +31,18 @@ public class SpaceService {
     private final SpaceMemberRepository spaceMemberRepository;
     private final ProductRepository productRepository;
     private final StorageService storageService;
+    private final AppProperties appProperties;
     private final Clock clock;
 
     public SpaceService(SpaceRepository spaceRepository, UserRepository userRepository, SpaceMemberRepository spaceMemberRepository,
                         ProductRepository productRepository, StorageService storageService,
-                        Clock clock) {
+                        AppProperties appProperties, Clock clock) {
         this.spaceRepository = spaceRepository;
         this.userRepository = userRepository;
         this.spaceMemberRepository = spaceMemberRepository;
         this.productRepository = productRepository;
         this.storageService = storageService;
+        this.appProperties = appProperties;
         this.clock = clock;
     }
 
@@ -81,7 +83,7 @@ public class SpaceService {
         List<String> spaceIds = memberships.stream().map(membership -> membership.getSpace().getId()).toList();
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(viewer.getTimezone())));
         Map<String, SpaceProductAggregate> productAggregates = productRepository
-            .findSpaceProductAggregates(userId, today, today.plusDays(ProductResponse.EXPIRING_SOON_DAYS))
+            .findSpaceProductAggregates(userId, today, today.plusDays(appProperties.getExpiringSoonDays()))
             .stream().collect(Collectors.toMap(SpaceProductAggregate::spaceId, aggregate -> aggregate));
         Map<String, Long> memberCounts = spaceMemberRepository.countMembersBySpaceIds(spaceIds).stream()
             .collect(Collectors.toMap(SpaceMemberCount::spaceId, SpaceMemberCount::memberCount));
@@ -167,7 +169,7 @@ public class SpaceService {
         List<Product> products = productRepository.findBySpace(space);
         long expiringSoon = products.stream().filter(product -> {
             long days = java.time.temporal.ChronoUnit.DAYS.between(today, product.getExpiresOn());
-            return days >= 0 && days <= ProductResponse.EXPIRING_SOON_DAYS;
+            return days >= 0 && days <= appProperties.getExpiringSoonDays();
         }).count();
         long expired = products.stream().filter(product -> product.getExpiresOn().isBefore(today)).count();
         SpaceResponse.NextExpiry next = products.stream()
