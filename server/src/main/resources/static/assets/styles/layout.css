@@ -1,0 +1,61 @@
+.site-header {
+  min-height: 76px;
+  padding: 0 6.5vw;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.wordmark {
+  color: var(--ink);
+  text-decoration: none;
+  font: 1.55rem var(--font-display);
+  letter-spacing: -0.06em;
+  white-space: nowrap;
+}
+.primary-nav {
+  display: flex;
+  align-items: center;
+  gap: 1.4rem;
+}
+.primary-nav a,
+.text-button {
+  color: var(--ink-muted);
+  text-decoration: none;
+  font-size: 0.91rem;
+}
+.primary-nav a:hover,
+.text-button:hover {
+  color: var(--accent);
+}
+.text-button {
+  border: 0;
+  padding: 0.35rem 0;
+  background: transparent;
+  cursor: pointer;
+}
+.page-content {
+  width: min(100% - 3rem, 1120px);
+  margin: 0 auto;
+  padding: clamp(3rem, 7vw, 6.25rem) 0 5rem;
+  flex: 1;
+}
+.page-heading {
+  max-width: 800px;
+  margin-bottom: 2.8rem;
+}
+.page-heading h1,
+.page-content > h1,
+.auth-statement h1 {
+  font-size: clamp(2.2rem, 5vw, 3.7rem);
+  line-height: 1.08;
+}
+.eyebrow {
+  margin-bottom: 1rem;
+  color: var(--ink-faint);
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}

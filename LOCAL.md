@@ -1,35 +1,25 @@
 # Local development
 
-WarrantyVault is designed to run locally first. The `local` Spring profile uses a file-backed H2 database and local image storage. Registration, Spaces, products, uploads, OCR, JWT authentication, and collaboration work with **zero external accounts or cloud services**.
+The `local` Spring profile uses a file-backed H2 database and local image storage. Registration, Spaces, products, uploads, authentication, and collaboration work without external accounts or cloud services.
 
 ## Prerequisites
 
 - Java 21
-- Node.js 22 and npm
 - Git
 
-No system Maven installation is needed; the Maven wrapper is included. OCR language data is fetched once during frontend dependency installation when it is not already present.
+The Maven wrapper is included; no system Maven installation is needed.
 
 ## Run the application
 
-Start the backend in one terminal from the repository root:
+From the repository root, run:
 
 ```sh
-cd backend
-./mvnw spring-boot:run -Dspring-boot.run.profiles=local
+make run
 ```
 
-Start the Vite frontend in another terminal:
+Open <http://localhost:8080>. Spring Boot serves the web app and API from this single origin.
 
-```sh
-cd frontend
-npm ci
-npm run dev
-```
-
-Open <http://localhost:5173>. In development, the frontend sends API requests to `http://localhost:8080` by default. No environment variables are required. To start both processes together instead, run `make local` from the repository root.
-
-Warranty status uses the configurable `app.expiring-soon-days` property, which defaults to `30` in the local profile. Change it in `backend/src/main/resources/application.yml` when testing a different attention window.
+Warranty status uses the configurable `app.expiring-soon-days` property, which defaults to `30`. Change it in `server/src/main/resources/application.properties` when testing a different attention window.
 
 ## Demo accounts
 
@@ -44,21 +34,21 @@ The sample products include active, expiring-soon, and expired coverage. Invitat
 
 ## Local data and reset
 
-- H2 database: `backend/data/warrantyvault` (H2 creates the database files there).
-- Uploaded bills and warranty cards: `backend/uploads/`.
+- H2 database: `server/data/warrantyvault` (H2 creates the database files there).
+- Uploaded bills and warranty cards: `server/uploads/`.
 - Generated demo images: stored in the same local uploads directory.
 
-Stop the backend before resetting local data. From the repository root, run:
+Stop the application before resetting local data. From the repository root, run:
 
 ```sh
 make clean-local
 ```
 
-This removes only `backend/data/` and `backend/uploads/`. The demo seeder recreates its accounts and sample data the next time the backend starts with an empty database.
+This removes only `server/data/` and `server/uploads/`. The demo seeder recreates its accounts and sample data the next time the application starts with an empty database.
 
-## OCR without a cloud account
+## Web-only feature boundary
 
-Receipt OCR runs in the browser with Tesseract.js, its WASM worker, and English language data served by the frontend. OCR processing does not require an OCR provider account or send the image to a hosted recognition service. The first `npm ci` downloads the English trained data (about 23 MB) if it is not already present. Keep the Vite server running for local development; after installation the OCR assets are served from the local checkout, so recognition itself does not need an internet connection. In an installed production PWA, open the app and run OCR once while online so its service worker caches the Tesseract assets for later offline use. OCR results are suggestions that should be reviewed before saving.
+The web app is online-only. Product details are entered manually, and bill or warranty-card images are uploaded to the Java application.
 
 ## Tests and useful targets
 
@@ -68,13 +58,10 @@ Run the full project checks from the repository root:
 make test
 ```
 
-This runs `./mvnw -B verify` in the backend and frontend lint, tests, and production build. The individual checks are:
+This runs the application checks:
 
 ```sh
-cd backend && ./mvnw -B verify
-cd frontend && npm run lint
-cd frontend && npm test
-cd frontend && npm run build
+cd server && ./mvnw -B verify
 ```
 
-Other targets are `make backend`, `make frontend`, and `make local`.
+Other targets are `make run`, `make local`, and `make clean-local`.

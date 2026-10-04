@@ -1,0 +1,105 @@
+.dashboard-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 3rem;
+}
+.dashboard-main h2,
+.dashboard-aside h2 {
+  margin: 2rem 0 1rem;
+  font-size: 1.6rem;
+}
+.summary-figures {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.figure {
+  display: grid;
+  gap: 0.35rem;
+  border-top: 2px solid var(--status-active);
+  padding-top: 0.7rem;
+}
+.figure strong {
+  font: 2rem var(--font-display);
+}
+.figure span {
+  color: var(--ink-muted);
+  font-size: 0.85rem;
+}
+.figure.soon {
+  border-color: var(--status-soon);
+}
+.figure.expired {
+  border-color: var(--status-expired);
+}
+.line-list {
+  margin-top: 1.4rem;
+  border-top: 1px solid var(--hairline);
+}
+.line-item {
+  min-height: 78px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.2rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.line-item strong {
+  font-weight: 600;
+}
+.line-item small,
+.field small {
+  display: block;
+  margin-top: 0.35rem;
+  color: var(--ink-faint);
+  font-size: 0.82rem;
+}
+.product-row > span:first-child,
+.member-row > span:first-child,
+.invitation-row > span:first-child {
+  min-width: 0;
+  flex: 1;
+}
+.product-row small {
+  max-width: 42rem;
+}
+.status-label {
+  color: var(--status-active);
+  font-size: 0.75rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.status-expiring-soon {
+  color: var(--status-soon);
+}
+.status-expired {
+  color: var(--status-expired);
+}
+.muted,
+.empty-note {
+  color: var(--ink-muted);
+}
+.empty-note {
+  padding: 1.5rem 0;
+}
+.first-run {
+  display: grid;
+  gap: 1.5rem;
+  max-width: 34rem;
+  padding-block: 2rem;
+}
+.inline-form {
+  max-width: 420px;
+  margin-top: 2.5rem;
+  padding: 1.6rem 0;
+  border-top: 1px solid var(--hairline);
+}
+.inline-form h2 {
+  margin-bottom: 1.2rem;
+  font-size: 1.7rem;
+}
+.toolbar-actions,
+.member-actions,
+.dialog-actions,

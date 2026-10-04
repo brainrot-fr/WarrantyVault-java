@@ -1,0 +1,73 @@
+:root {
+  color-scheme: light;
+  --canvas: #f4f0e8;
+  --canvas-hover: #ebe5d9;
+  --ink: #282b27;
+  --ink-muted: #555b53;
+  --ink-faint: #73786f;
+  --hairline: rgba(40, 43, 39, 0.17);
+  --accent: #426451;
+  --accent-ink: #fffdf8;
+  --raised: #faf8f2;
+  --status-active: #28634d;
+  --status-soon: #86521d;
+  --status-expired: #913f3b;
+  --radius-control: 8px;
+  --font-display: "Playfair Display", Georgia, serif;
+  --font-body: "DM Sans", "Avenir Next", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  min-height: 100%;
+  margin: 0;
+  background: var(--canvas);
+  color: var(--ink);
+}
+body,
+button,
+input {
+  font: 16px/1.55 var(--font-body);
+}
+button,
+a,
+input {
+  -webkit-tap-highlight-color: transparent;
+}
+h1,
+h2,
+p {
+  margin: 0;
+}
+h1,
+h2 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.04em;
+}
+a {
+  color: inherit;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.skip-link {
+  position: absolute;
+  left: 1rem;
+  top: -4rem;
+  z-index: 2;
+  padding: 0.6rem;
+  background: var(--raised);
+}
+.skip-link:focus {
+  top: 1rem;
+}
+.app-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}

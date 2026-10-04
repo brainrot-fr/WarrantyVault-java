@@ -1,0 +1,117 @@
+import {apiJson} from '../api.js';
+import {
+  element,
+  link,
+  addField,
+  appendFieldErrors,
+  showMessage
+} from '../ui.js';
+
+export function renderAuth(registration, runtime) {
+  const main = element('main', {className: 'page-content'});
+  const layout = element('div', {className: 'auth-layout'});
+  const statement = element('section', {className: 'auth-statement'});
+  statement.append(
+      element(
+          'p', {className: 'eyebrow'},
+          registration ? 'A place for every purchase' :
+                         'Your records, ready when you are'),
+      element(
+          'h1', {},
+          registration ? 'Keep the details that matter.' :
+                         'Your warranties, kept close.'),
+      element(
+          'p', {},
+          registration ?
+              'Bring bills and coverage dates together in one private place.' :
+              'Sign in to find the receipts and coverage dates you have saved.'));
+  const form = element('form', {className: 'form-column', novalidate: ''});
+  form.append(
+      element('h2', {}, registration ? 'Create your vault' : 'Sign in'));
+  const errorRegion = element('div', {'aria-live': 'polite'});
+  const nameInput = registration ?
+      addField(
+          form, 'Your name', 'name', 'text',
+          {autocomplete: 'name', minlength: '2', maxlength: '120'}) :
+      null;
+  const emailInput = addField(
+      form, 'Email address', 'email', 'email', {autocomplete: 'email'});
+  const passwordInput = addField(form, 'Password', 'password', 'password', {
+    autocomplete: registration ? 'new-password' : 'current-password',
+    minlength: registration ? '8' : undefined,
+    maxlength: '72'
+  });
+  if (registration)
+    addField(
+        form, 'Confirm password', 'confirmPassword', 'password',
+        {autocomplete: 'new-password'});
+  form.append(
+      errorRegion,
+      element(
+          'button',
+          {className: 'button button-primary form-submit', type: 'submit'},
+          registration ? 'Create account' : 'Sign in'));
+  form.append(element(
+      'p', {className: 'form-switch'},
+      registration ? 'Already have an account? ' : 'New to WarrantyVault? '));
+  form.lastChild.append(link(
+      registration ? 'Sign in' : 'Create an account',
+      registration ? '/login' : '/register'));
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    errorRegion.replaceChildren();
+    for (const input of form.querySelectorAll('[aria-invalid="true"]'))
+      input.removeAttribute('aria-invalid');
+    if (!form.reportValidity()) return;
+    const values = new FormData(form);
+    const password = String(values.get('password'));
+    if (registration && new TextEncoder().encode(password).length > 72) {
+      showMessage(errorRegion, 'Password must be no more than 72 UTF-8 bytes.');
+      passwordInput.focus();
+      return;
+    }
+    if (registration && password !== values.get('confirmPassword')) {
+      showMessage(errorRegion, 'Passwords do not match.');
+      form.elements.confirmPassword.focus();
+      return;
+    }
+    const submit = form.querySelector('[type="submit"]');
+    submit.disabled = true;
+    submit.textContent = 'Please wait…';
+    try {
+      const nextSession = registration ?
+          await apiJson('/api/auth/register', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: String(values.get('name')).trim(),
+              email: String(values.get('email')).trim(),
+              password,
+              timezone:
+                  Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+            })
+          }) :
+          await apiJson('/api/auth/login', {
+            method: 'POST',
+            body: JSON.stringify(
+                {email: String(values.get('email')).trim(), password})
+          });
+      runtime.acceptSession(nextSession);
+      const next = new URLSearchParams(window.location.search).get('next');
+      runtime.navigate(
+          next?.startsWith('/') && !next.startsWith('//') ? next : '/dashboard',
+          true);
+    } catch (error) {
+      showMessage(errorRegion, error.message);
+      const firstField =
+          appendFieldErrors(errorRegion, form, error.fieldErrors);
+      if (firstField instanceof HTMLElement) firstField.focus();
+    } finally {
+      submit.disabled = false;
+      submit.textContent = registration ? 'Create account' : 'Sign in';
+    }
+  });
+  layout.append(statement, form);
+  main.append(layout);
+  runtime.renderShell(main);
+  (registration ? nameInput : emailInput).focus();
+}

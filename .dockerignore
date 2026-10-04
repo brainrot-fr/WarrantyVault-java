@@ -1,8 +1,9 @@
 .git
-**/node_modules
 **/target
-**/dist
-frontend/android
 **/data
 **/uploads
 **/local.log
+SETUP.md
+*.jks
+*.keystore
+.env*

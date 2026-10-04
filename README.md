@@ -1,25 +1,34 @@
 # WarrantyVault
 
-WarrantyVault is a local-first product warranty vault for keeping ownership records, purchase documents, and warranty coverage organized. It supports private Spaces for homes or small teams, with role-based collaboration and in-app invitations.
+WarrantyVault keeps product details, receipts, and warranty dates together. Create Spaces for a home or team, then share them with owners, editors, and viewers.
 
-## Features
+## What it does
 
-- Organize products, bills, and optional warranty cards into Spaces.
-- Share Spaces with owners, editors, and viewers.
-- Track active, expiring-soon, and expired warranties, with dashboard lists for upcoming and recently expired coverage.
-- Use browser-based OCR to suggest product details from an image.
-- Work locally without cloud accounts or hosted services.
+- Record products, purchase dates, coverage periods, prices, and notes.
+- Upload private bills and optional warranty-card images.
+- Find coverage that is active, expiring soon, or expired.
+- Invite people to a Space and manage their access.
 
-## Technology
+## Built with
 
-| Area | Technology |
-| --- | --- |
-| Frontend | React 19, Vite, JavaScript |
-| Backend | Java 21, Spring Boot |
-| Local database | H2 file database with Flyway migrations |
-| Optional deployed database | MySQL with Flyway migrations |
-| Authentication | JWT access tokens and rotating refresh-token cookies |
-| Image storage | Local filesystem |
-| Optional deployment | One Railway service serves the API and built frontend |
+- Java 21 and Spring Boot for the application and API.
+- HTML, CSS, and browser JavaScript modules for the web interface.
+- H2 with Flyway for local development; MySQL with Flyway for deployment.
+- JWT access tokens with rotating, same-origin refresh cookies.
+- Local filesystem storage for uploaded images.
 
-The optional Railway demo stores images on the instance's local filesystem. Railway free instances have an **ephemeral filesystem**, so uploaded images can be lost after a redeploy or restart. This is acceptable for a demo/interview deployment; keep original documents elsewhere.
+## Run locally
+
+Install Java 21, then run:
+
+```sh
+make run
+```
+
+Open <http://localhost:8080>. The local profile uses a file-backed H2 database and stores uploads under `server/uploads/`. See [LOCAL.md](./LOCAL.md) for demo accounts, test commands, and local-data details.
+
+## Deploy to Railway
+
+The repository includes `railway.toml` and a Dockerfile under `server/`. Railway builds one Java service that serves both the UI and API. Configure the production database and secret environment variables in Railway before deploying.
+
+Uploaded images use the application filesystem. Railway instances may have ephemeral storage, so configure persistent storage or keep a separate copy of important documents.

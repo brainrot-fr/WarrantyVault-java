@@ -1,27 +1,17 @@
-.PHONY: local backend frontend test clean-local
+.PHONY: local run test clean-local
 
-local:
-	@set -eu; \
-	(cd backend && ./mvnw spring-boot:run -Dspring-boot.run.profiles=local > local.log 2>&1) & backend_pid=$$!; \
-	trap 'kill "$$backend_pid" 2>/dev/null || true; wait "$$backend_pid" 2>/dev/null || true' EXIT INT TERM; \
-	cd frontend; \
-	npm install; \
-	npm run dev
+local: run
 
-backend:
-	cd backend && ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
-
-frontend:
-	cd frontend && npm install && npm run dev
+run:
+	cd server && ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 
 test:
-	cd backend && ./mvnw -B verify
-	cd frontend && npm run lint && npm test && npm run build
+	cd server && ./mvnw -B verify
 
 clean-local:
-	@if [ -d backend/data ] || [ -d backend/uploads ]; then \
-		rm -rf backend/data backend/uploads; \
-		printf 'Removed backend/data and backend/uploads\\n'; \
+	@if [ -d server/data ] || [ -d server/uploads ]; then \
+		rm -rf server/data server/uploads; \
+		printf 'Removed server/data and server/uploads\\n'; \
 	else \
-		printf 'No backend/data or backend/uploads directories to remove\\n'; \
+		printf 'No server/data or server/uploads directories to remove\\n'; \
 	fi

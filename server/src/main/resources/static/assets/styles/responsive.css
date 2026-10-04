@@ -1,0 +1,59 @@
+@media (max-width: 760px) {
+  .site-header {
+    min-height: 64px;
+    padding-inline: 1.25rem;
+    gap: 1rem;
+  }
+  .primary-nav {
+    gap: 0.8rem;
+  }
+  .primary-nav a {
+    font-size: 0.84rem;
+  }
+  .page-content {
+    width: min(100% - 2.5rem, 1120px);
+    padding-top: 3rem;
+  }
+  .landing,
+  .auth-layout,
+  .dashboard-layout {
+    grid-template-columns: 1fr;
+  }
+  .landing {
+    min-height: auto;
+    padding: 1rem 0 3rem;
+  }
+  .landing h1 {
+    font-size: clamp(3.3rem, 15vw, 5rem);
+  }
+  .landing-note {
+    max-width: 380px;
+  }
+  .form-column {
+    width: 100%;
+  }
+  .dashboard-layout {
+    gap: 1.5rem;
+  }
+  .product-filters,
+  .product-reader-layout {
+    grid-template-columns: 1fr;
+  }
+  .line-item,
+  .member-row,
+  .invitation-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding-block: 0.8rem;
+  }
+  .member-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+  .page-controls {
+    align-items: flex-start;
+  }
+  .site-footer {
+    padding-inline: 1.25rem;
+  }
+}
