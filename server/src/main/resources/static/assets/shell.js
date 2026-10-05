@@ -1,5 +1,14 @@
 import {element, link} from './ui.js';
 
+function navigationLink(label, href) {
+  const anchor = link(label, href);
+  const pathname = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (pathname === href ||
+      (href === '/spaces' && pathname.startsWith('/spaces/')))
+    anchor.setAttribute('aria-current', 'page');
+  return anchor;
+}
+
 function renderHeader(authenticated, onLogout) {
   const header = element('header', {className: 'site-header'});
   header.append(
@@ -8,8 +17,10 @@ function renderHeader(authenticated, onLogout) {
     const nav = element(
         'nav', {'aria-label': 'Main navigation', className: 'primary-nav'});
     nav.append(
-        link('Overview', '/dashboard'), link('Spaces', '/spaces'),
-        link('Invitations', '/invitations'), link('Settings', '/settings'));
+        navigationLink('Overview', '/dashboard'),
+        navigationLink('Spaces', '/spaces'),
+        navigationLink('Invitations', '/invitations'),
+        navigationLink('Settings', '/settings'));
     const signOut = element(
         'button', {className: 'text-button', type: 'button'}, 'Sign out');
     signOut.addEventListener('click', onLogout);
@@ -18,7 +29,7 @@ function renderHeader(authenticated, onLogout) {
     const nav = element(
         'nav', {'aria-label': 'Account navigation', className: 'primary-nav'});
     nav.append(
-        link('Sign in', '/login'),
+        navigationLink('Sign in', '/login'),
         link('Create account', '/register', 'button button-primary'));
     header.append(nav);
   }

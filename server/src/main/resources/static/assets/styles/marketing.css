@@ -1,5 +1,5 @@
 .landing {
-  min-height: min(66vh, 700px);
+  min-height: min(68vh, 720px);
   display: grid;
   grid-template-columns: minmax(0, 1.4fr) minmax(240px, 0.6fr);
   align-items: center;
@@ -12,10 +12,10 @@
 }
 .landing-intro {
   max-width: 500px;
-  margin-top: 1.8rem;
+  margin-top: 1.5rem;
   color: var(--ink-muted);
-  font-size: 1.08rem;
-  line-height: 1.8;
+  font-size: 1.05rem;
+  line-height: 1.75;
 }
 .landing-actions {
   display: flex;
@@ -29,31 +29,38 @@
   line-height: 1.8;
 }
 .button {
-  min-height: 46px;
+  min-height: 44px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   border: 1px solid transparent;
   border-radius: var(--radius-control);
-  padding: 0.7rem 1.15rem;
+  padding: 0.62rem 1rem;
   text-decoration: none;
   font-size: 0.93rem;
   font-weight: 600;
   cursor: pointer;
 }
 .button:disabled {
-  opacity: 0.6;
+  opacity: 0.58;
   cursor: wait;
+}
+.button:focus-visible {
+  outline-offset: 3px;
 }
 .button-primary {
   background: var(--accent);
   color: var(--accent-ink);
 }
 .button-primary:hover:not(:disabled) {
-  filter: brightness(1.08);
+  background: var(--accent-hover);
 }
 .button-quiet {
-  border-color: var(--hairline);
+  border-color: rgba(40, 43, 39, 0.24);
   color: var(--ink);
-  background: transparent;
+  background: var(--raised);
+}
+.button-quiet:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--canvas-hover);
 }

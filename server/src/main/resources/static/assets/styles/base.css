@@ -7,12 +7,16 @@
   --ink-faint: #73786f;
   --hairline: rgba(40, 43, 39, 0.17);
   --accent: #426451;
+  --accent-hover: #355441;
   --accent-ink: #fffdf8;
   --raised: #faf8f2;
+  --surface-shadow: 0 10px 28px rgba(40, 43, 39, 0.055);
   --status-active: #28634d;
   --status-soon: #86521d;
   --status-expired: #913f3b;
   --radius-control: 8px;
+  --radius-card: 14px;
+  --content-width: 1120px;
   --font-display: "Playfair Display", Georgia, serif;
   --font-body: "DM Sans", "Avenir Next", sans-serif;
 }
@@ -29,12 +33,15 @@ body {
 }
 body,
 button,
-input {
+input,
+select,
+textarea {
   font: 16px/1.55 var(--font-body);
 }
 button,
 a,
-input {
+input,
+select {
   -webkit-tap-highlight-color: transparent;
 }
 h1,
@@ -55,13 +62,37 @@ a {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
+button,
+a,
+input,
+select,
+textarea {
+  transition:
+    color 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    opacity 150ms ease;
+}
+button,
+input,
+select,
+textarea {
+  accent-color: var(--accent);
+}
+button:disabled {
+  cursor: not-allowed;
+}
 .skip-link {
   position: absolute;
   left: 1rem;
   top: -4rem;
   z-index: 2;
   padding: 0.6rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
   background: var(--raised);
+  box-shadow: var(--surface-shadow);
 }
 .skip-link:focus {
   top: 1rem;

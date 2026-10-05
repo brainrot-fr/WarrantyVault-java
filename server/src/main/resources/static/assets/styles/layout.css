@@ -1,11 +1,12 @@
 .site-header {
-  min-height: 76px;
-  padding: 0 6.5vw;
+  min-height: 72px;
+  padding: 0 max(calc((100vw - var(--content-width)) / 2), 1.5rem);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 2rem;
   border-bottom: 1px solid var(--hairline);
+  background: rgba(244, 240, 232, 0.94);
 }
 .wordmark {
   color: var(--ink);
@@ -27,11 +28,19 @@
 }
 .primary-nav a:hover,
 .text-button:hover {
-  color: var(--accent);
+  color: var(--accent-hover);
 }
 .primary-nav a.button-primary,
 .primary-nav a.button-primary:hover {
   color: var(--accent-ink);
+}
+.primary-nav a[aria-current="page"]:not(.button-primary) {
+  color: var(--ink);
+  font-weight: 650;
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.45rem;
 }
 .text-button {
   border: 0;
@@ -40,14 +49,14 @@
   cursor: pointer;
 }
 .page-content {
-  width: min(100% - 3rem, 1120px);
+  width: min(100% - 3rem, var(--content-width));
   margin: 0 auto;
-  padding: clamp(3rem, 7vw, 6.25rem) 0 5rem;
+  padding: clamp(2.75rem, 6vw, 5rem) 0 5rem;
   flex: 1;
 }
 .page-heading {
-  max-width: 800px;
-  margin-bottom: 2.8rem;
+  max-width: 850px;
+  margin-bottom: 2.25rem;
 }
 .page-heading h1,
 .page-content > h1,
@@ -56,10 +65,14 @@
   line-height: 1.08;
 }
 .eyebrow {
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   color: var(--ink-faint);
   font-size: 0.75rem;
   font-weight: 650;
   letter-spacing: 0.13em;
   text-transform: uppercase;
+}
+.page-heading .section-intro {
+  max-width: 66ch;
+  margin-top: 0.8rem;
 }
