@@ -69,6 +69,11 @@ export async function renderDashboard(runtime) {
               invitations.length === 1 ? '' : 's'} waiting.`));
     }
     const products = dashboard.upcoming || [];
+    const expiringSoon = products.filter(
+        product => product.status === 'EXPIRING_SOON');
+    const activeProducts =
+        products.filter(product => product.status === 'ACTIVE');
+    const recentlyExpired = dashboard.recentlyExpired || [];
     if (!spaces.length) {
       primary.append(element('section', {className: 'first-run'}, [
         element(
@@ -76,23 +81,31 @@ export async function renderDashboard(runtime) {
             'Create a Space for a place, such as Home, then add a bill and its warranty period.'),
         link('Create your first Space', '/spaces', 'button button-primary')
       ]));
-    } else if (!products.length && !(dashboard.recentlyExpired || []).length) {
+    } else if (!products.length && !recentlyExpired.length) {
       primary.append(element(
           'p', {className: 'empty-note'},
           'No warranty records need your attention yet.'));
     } else {
-      primary.append(element(
-          'h2', {},
-          `Upcoming coverage (${dashboard.thresholdDays || 30} days)`));
-      const upcoming = element('div', {className: 'line-list'});
-      for (const product of products)
-        upcoming.append(renderProductSummary(product));
-      primary.append(upcoming);
-      if (dashboard.recentlyExpired?.length) {
+      if (expiringSoon.length) {
+        primary.append(element('h2', {}, 'Expiring soon'));
+        const expiringSoonList = element('div', {className: 'line-list'});
+        for (const product of expiringSoon)
+          expiringSoonList.append(renderProductSummary(product));
+        primary.append(expiringSoonList);
+      }
+      if (activeProducts.length) {
         primary.append(
-            element('h2', {className: 'section-title'}, 'Recently expired'));
+            element('h2', {className: 'section-title'}, 'Active products'));
+        const activeList = element('div', {className: 'line-list'});
+        for (const product of activeProducts)
+          activeList.append(renderProductSummary(product));
+        primary.append(activeList);
+      }
+      if (recentlyExpired.length) {
+        primary.append(
+            element('h2', {className: 'section-title'}, 'Expired products'));
         const expired = element('div', {className: 'line-list'});
-        for (const product of dashboard.recentlyExpired)
+        for (const product of recentlyExpired)
           expired.append(renderProductSummary(product));
         primary.append(expired);
       }
