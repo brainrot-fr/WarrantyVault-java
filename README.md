@@ -1,34 +1,19 @@
 # WarrantyVault
 
-WarrantyVault keeps product details, receipts, and warranty dates together. Create Spaces for a home or team, then share them with owners, editors, and viewers.
+WarrantyVault helps you keep product details, receipts, and warranty dates together in one place on your computer.
 
-## What it does
+## Using WarrantyVault
 
-- Record products, purchase dates, coverage periods, prices, and notes.
-- Upload private bills and optional warranty-card images.
-- Find coverage that is active, expiring soon, or expired.
-- Invite people to a Space and manage their access.
+1. Open WarrantyVault in your browser.
+2. Choose **Create account** to make your personal account, or sign in if you already have one.
+3. Add products with their purchase dates and warranty details.
+4. Attach receipt or warranty-card images so they are easy to find later.
+5. Create Spaces to organize records, for example by home or family, and invite other people to share a Space.
 
-## Built with
+Your dashboard helps you find warranties that are active, expiring soon, or expired. You can update product details and manage shared Space access in the app.
 
-- Java 21 and Spring Boot for the application and API.
-- HTML, CSS, and browser JavaScript modules for the web interface.
-- H2 with Flyway for local development; MySQL with Flyway for deployment.
-- JWT access tokens with rotating, same-origin refresh cookies.
-- Local filesystem storage for uploaded images.
+## Your data and privacy
 
-## Run locally
+WarrantyVault stores product records and uploaded documents locally on the computer where it runs. It is not a cloud-sync service: your information is not automatically available on your other devices. People you invite can access shared records through accounts on the same WarrantyVault installation.
 
-Install Java 21, then run:
-
-```sh
-make run
-```
-
-Open <http://localhost:8080>. The local profile uses a file-backed H2 database and stores uploads under `server/uploads/`. See [LOCAL.md](./LOCAL.md) for demo accounts, test commands, and local-data details.
-
-## Deploy to Railway
-
-The repository includes `railway.toml` and a Dockerfile under `server/`. Railway builds one Java service that serves both the UI and API. Configure the production database and secret environment variables in Railway before deploying.
-
-Uploaded images use the application filesystem. Railway instances may have ephemeral storage, so configure persistent storage or keep a separate copy of important documents.
+Keep your account credentials private. If you need to back up your records or move WarrantyVault to another computer, make sure both the database and uploaded documents are included in your backup.

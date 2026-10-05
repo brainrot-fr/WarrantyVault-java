@@ -1,67 +1,85 @@
 # Local development
 
-The `local` Spring profile uses a file-backed H2 database and local image storage. Registration, Spaces, products, uploads, authentication, and collaboration work without external accounts or cloud services.
+WarrantyVault runs on your computer with Java 21 and a local MySQL server. The app binds only to `127.0.0.1`; its UI, API, database, and uploaded documents are local. It does not use a cloud database, external API, or hosted deployment.
 
 ## Prerequisites
 
 - Java 21
+- MySQL 8
 - Git
 
 The Maven wrapper is included; no system Maven installation is needed.
 
-## Run the application
+## Create the local database
 
-From the repository root, run:
+Connect to your local MySQL server as an administrator:
 
 ```sh
+mysql -u root -p
+```
+
+Create the application database and a dedicated local user:
+
+```sql
+CREATE DATABASE warrantyvault CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'warrantyvault'@'127.0.0.1' IDENTIFIED BY 'choose-a-local-password';
+GRANT ALL PRIVILEGES ON warrantyvault.* TO 'warrantyvault'@'127.0.0.1';
+```
+
+The app connects to `127.0.0.1:3306/warrantyvault`. Flyway creates the tables at startup. Set `MYSQL_USER` and `MYSQL_PASSWORD` if you chose credentials other than the defaults.
+
+## Run the application
+
+Start the app from the repository root:
+
+```sh
+MYSQL_USER=warrantyvault MYSQL_PASSWORD='choose-a-local-password' make run
+```
+
+Open <http://127.0.0.1:8080>. Java and MySQL must both be running locally.
+
+You can also export the database credentials in your shell before running:
+
+```sh
+export MYSQL_USER=warrantyvault
+export MYSQL_PASSWORD='choose-a-local-password'
 make run
 ```
 
-Open <http://localhost:8080>. Spring Boot serves the web app and API from this single origin.
-
-Warranty status uses the configurable `app.expiring-soon-days` property, which defaults to `30`. Change it in `server/src/main/resources/application.properties` when testing a different attention window.
+Warranty status uses `app.expiring-soon-days`, which defaults to `30` in `server/src/main/resources/application.properties`.
 
 ## Demo accounts
 
-The local profile seeds sample data on a new database:
+The application seeds these accounts and sample records when the database is empty:
 
 | Email | Password | Access |
 | --- | --- | --- |
 | `demo@warrantyvault.local` | `Password123!` | Owner of the Home and Farmhouse Spaces |
 | `family@warrantyvault.local` | `Password123!` | Viewer in Home with a pending Farmhouse invitation |
 
-The sample products include active, expiring-soon, and expired coverage. Invitations are in-app and can be accepted from the invitee's Invitations screen. To test with a clean account, register another user in the application.
+Sample products include active, expiring-soon, and expired coverage. To start with a clean account, register another user in the application.
 
 ## Local data and reset
 
-- H2 database: `server/data/warrantyvault` (H2 creates the database files there).
+- MySQL database: `warrantyvault` on `127.0.0.1:3306`.
 - Uploaded bills and warranty cards: `server/uploads/`.
 - Generated demo images: stored in the same local uploads directory.
 
-Stop the application before resetting local data. From the repository root, run:
+To reset the database, stop the app and run these statements in MySQL. **This permanently deletes all local users, Spaces, products, and invitations.**
 
-```sh
-make clean-local
+```sql
+DROP DATABASE warrantyvault;
+CREATE DATABASE warrantyvault CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 ```
 
-This removes only `server/data/` and `server/uploads/`. The demo seeder recreates its accounts and sample data the next time the application starts with an empty database.
+Uploaded images are stored separately. Remove files in `server/uploads/` only if you also want to delete the saved document images.
 
-## Web-only feature boundary
+## Tests
 
-The web app is online-only. Product details are entered manually, and bill or warranty-card images are uploaded to the Java application.
-
-## Tests and useful targets
-
-Run the full project checks from the repository root:
+Run all application checks from the repository root:
 
 ```sh
 make test
 ```
 
-This runs the application checks:
-
-```sh
-cd server && ./mvnw -B verify
-```
-
-Other targets are `make run`, `make local`, and `make clean-local`.
+The automated integration tests use an in-memory H2 database; running the application itself always uses the local MySQL database.

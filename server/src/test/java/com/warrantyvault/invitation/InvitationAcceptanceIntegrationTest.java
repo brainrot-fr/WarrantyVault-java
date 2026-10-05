@@ -12,16 +12,15 @@ import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {
         "spring.datasource.url=jdbc:h2:mem:invitation-acceptance;DB_CLOSE_DELAY=-1",
+        "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
         "app.storage.local-dir=target/invitation-acceptance"
     }
 )
-@ActiveProfiles("local")
 class InvitationAcceptanceIntegrationTest {
     @LocalServerPort
     private int port;

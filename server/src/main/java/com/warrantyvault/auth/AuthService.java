@@ -17,7 +17,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.RequiredArgsConstructor;
-import org.springframework.core.env.Environment;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Service;
@@ -30,13 +29,11 @@ import jakarta.servlet.http.HttpServletResponse;
 public class AuthService {
     private static final long REFRESH_TOKEN_TTL_SECONDS = 30L * 24 * 60 * 60;
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
-    private static final String DEV_JWT_SECRET = "dev-secret-key-1234567890-abcdef";
     private static final long ROTATION_GRACE_SECONDS = 15;
 
     private final JwtService jwtService;
     private final RefreshTokenRepository refreshTokenRepository;
     private final AppProperties appProperties;
-    private final Environment environment;
     private final Clock clock;
     private final ConcurrentHashMap<String, GraceToken> graceTokens = new ConcurrentHashMap<>();
 
@@ -153,15 +150,12 @@ public class AuthService {
     }
 
     private void writeRefreshCookie(HttpServletResponse response, String value, long maxAgeSeconds) {
-        boolean secure = environment.matchesProfiles("prod");
         ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from("wv_refresh", value)
             .httpOnly(true)
-            .secure(secure)
+            .secure(false)
             .path("/api")
             .sameSite(appProperties.getCookie().getSameSite())
             .maxAge(maxAgeSeconds);
-        String domain = appProperties.getCookie().getDomain();
-        if (domain != null && !domain.isBlank()) builder.domain(domain);
         response.addHeader("Set-Cookie", builder.build().toString());
     }
 

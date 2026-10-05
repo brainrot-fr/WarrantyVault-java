@@ -1,9 +1,0 @@
-.git
-**/target
-**/data
-**/uploads
-**/local.log
-SETUP.md
-*.jks
-*.keystore
-.env*

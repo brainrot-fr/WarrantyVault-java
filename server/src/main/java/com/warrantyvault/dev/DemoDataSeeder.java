@@ -34,12 +34,10 @@ import javax.imageio.ImageIO;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Profile;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.multipart.MultipartFile;
 
 @Configuration
-@Profile("local")
 public class DemoDataSeeder {
     private final UserRepository userRepository;
     private final SpaceRepository spaceRepository;

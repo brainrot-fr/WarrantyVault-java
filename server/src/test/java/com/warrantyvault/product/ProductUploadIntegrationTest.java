@@ -17,16 +17,15 @@ import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
-import org.springframework.test.context.ActiveProfiles;
 
 @SpringBootTest(
     webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
     properties = {
         "spring.datasource.url=jdbc:h2:mem:upload-integration;DB_CLOSE_DELAY=-1",
+        "spring.jpa.database-platform=org.hibernate.dialect.H2Dialect",
         "app.storage.local-dir=target/upload-integration"
     }
 )
-@ActiveProfiles("local")
 class ProductUploadIntegrationTest {
     private static final int UPLOAD_SIZE = 2 * 1024 * 1024;
 

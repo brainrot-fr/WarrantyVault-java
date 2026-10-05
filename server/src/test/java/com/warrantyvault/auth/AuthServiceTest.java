@@ -22,7 +22,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
-import org.springframework.mock.env.MockEnvironment;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 class AuthServiceTest {
@@ -31,7 +30,6 @@ class AuthServiceTest {
         mock(JwtService.class),
         tokenRepository,
         new AppProperties(),
-        new MockEnvironment(),
         Clock.fixed(Instant.parse("2025-01-01T00:00:00Z"), ZoneOffset.UTC)
     );
 
@@ -56,6 +54,7 @@ class AuthServiceTest {
         org.junit.jupiter.api.Assertions.assertTrue(cookie.contains("HttpOnly"));
         org.junit.jupiter.api.Assertions.assertTrue(cookie.contains("Path=/api"));
         org.junit.jupiter.api.Assertions.assertTrue(cookie.contains("SameSite=Lax"));
+        org.junit.jupiter.api.Assertions.assertFalse(cookie.contains("Secure"));
         assertEquals("Test browser", savedTokens.getFirst().getUserAgent());
     }
 

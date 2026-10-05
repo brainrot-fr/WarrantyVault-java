@@ -20,7 +20,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.springframework.core.env.Environment;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
@@ -31,12 +30,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final long CLEANUP_INTERVAL = 256;
     private final ConcurrentHashMap<String, TokenBucket> buckets = new ConcurrentHashMap<>();
     private final AtomicLong requests = new AtomicLong();
-    private final boolean localProfile;
-
-    public RateLimitFilter(Environment environment) {
-        this.localProfile = environment.matchesProfiles("local");
-    }
-
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, jakarta.servlet.FilterChain chain)
         throws ServletException, IOException {
@@ -76,8 +69,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         chain.doFilter(nextRequest, response);
     }
 
-    private boolean allow(String key, int productionCapacity, Duration window, HttpServletResponse response) throws IOException {
-        int capacity = localProfile ? productionCapacity * 10 : productionCapacity;
+    private boolean allow(String key, int baseCapacity, Duration window, HttpServletResponse response) throws IOException {
+        int capacity = baseCapacity * 10;
         long retryAfter = buckets.computeIfAbsent(key, ignored -> new TokenBucket(capacity, window))
             .tryConsume(capacity, window);
         if (retryAfter == 0) return true;
@@ -89,12 +82,6 @@ public class RateLimitFilter extends OncePerRequestFilter {
     }
 
     private String clientIp(HttpServletRequest request) {
-        String forwarded = request.getHeader("X-Forwarded-For");
-        if (forwarded != null && !forwarded.isBlank()) {
-            String[] hops = forwarded.split(",");
-            String lastHop = hops[hops.length - 1].trim();
-            if (!lastHop.isBlank()) return lastHop;
-        }
         return request.getRemoteAddr();
     }
 

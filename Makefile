@@ -1,17 +1,7 @@
-.PHONY: local run test clean-local
+.PHONY: local run test
 
-local: run
-
-run:
-	cd server && ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
+local run:
+	cd server && ./mvnw spring-boot:run -e & firefox http://localhost:8080/
 
 test:
 	cd server && ./mvnw -B verify
-
-clean-local:
-	@if [ -d server/data ] || [ -d server/uploads ]; then \
-		rm -rf server/data server/uploads; \
-		printf 'Removed server/data and server/uploads\\n'; \
-	else \
-		printf 'No server/data or server/uploads directories to remove\\n'; \
-	fi

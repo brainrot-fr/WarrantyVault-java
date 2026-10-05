@@ -8,18 +8,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
-import org.springframework.mock.env.MockEnvironment;
 
 class RateLimitFilterTest {
     @Test
     void limitsLoginAttemptsByClientAndNormalizedEmail() throws Exception {
-        MockEnvironment environment = new MockEnvironment();
-        environment.setActiveProfiles("prod");
-        RateLimitFilter filter = new RateLimitFilter(environment);
+        RateLimitFilter filter = new RateLimitFilter();
         AtomicInteger passedThrough = new AtomicInteger();
         jakarta.servlet.FilterChain chain = (request, response) -> passedThrough.incrementAndGet();
 
-        for (int attempt = 0; attempt < 10; attempt++) {
+        for (int attempt = 0; attempt < 100; attempt++) {
             MockHttpServletResponse response = sendLogin(filter, chain, "Person@example.test");
             assertEquals(200, response.getStatus());
         }
@@ -29,7 +26,7 @@ class RateLimitFilterTest {
 
         MockHttpServletResponse differentEmail = sendLogin(filter, chain, "other@example.test");
         assertEquals(200, differentEmail.getStatus());
-        assertEquals(11, passedThrough.get());
+        assertEquals(101, passedThrough.get());
     }
 
     private MockHttpServletResponse sendLogin(RateLimitFilter filter, jakarta.servlet.FilterChain chain, String email) throws Exception {
