@@ -67,7 +67,7 @@ This architecture has one Railway app service. Its Spring Boot jar serves both t
    ```
 
 3. Cloudinary's `authenticated` delivery type is private: an unsigned public delivery URL must not work. WarrantyVault signs a short-lived URL on the server, downloads the bytes, and returns them only from the authenticated product image route. No transformation is requested.
-4. In Cloudinary account/security settings, review allowed delivery types and API access. After the first upload, open **Media Library** and confirm an asset under `warrantyvault/<space-id>`. Do not paste the secret into the browser, repository, issue tracker, or logs.
+4. In Cloudinary account/security settings, review allowed delivery types and API access. After the first upload, open **Media Library** and confirm an asset under `Home/bills/<space-id>`. Do not paste the secret into the browser, repository, issue tracker, or logs.
 5. To rotate the secret, create a new API secret/key pair, replace the sealed Railway `CLOUDINARY_URL`, redeploy, smoke-test an image, then revoke the old pair. Watch the free plan's storage, bandwidth, transformations, and Admin API limits in the current Usage/Billing screen; free quotas and names can change.
 
 ## 5. Add app variables
@@ -116,7 +116,7 @@ curl -i https://<RAILWAY_DOMAIN>/api/health
 # {"status":"UP"}
 ```
 
-In a private browser window: register, create a Space, add a product with a bill, confirm the asset appears in Cloudinary under `warrantyvault/<space-id>`, and confirm the bill displays in the app. Inspect the browser network response: it should be the authenticated `/api/products/<id>/images/bill` response, never a Cloudinary URL. Trigger **Redeploy** once more and repeat the image check; both database data and the image must survive.
+In a private browser window: register, create a Space, add a product with a bill, confirm the asset appears in Cloudinary under `Home/bills/<space-id>`, and confirm the bill displays in the app. Inspect the browser network response: it should be the authenticated `/api/products/<id>/images/bill` response, never a Cloudinary URL. Trigger **Redeploy** once more and repeat the image check; both database data and the image must survive.
 
 `server.forward-headers-strategy=native` makes the servlet request scheme and remote address reflect Railway's proxy headers, so `RateLimitFilter` buckets by the real client IP. This relies on Railway being the trusted proxy. Do not expose the app directly without a trusted proxy: a client that can inject `Forwarded`/`X-Forwarded-For` can spoof the bucket IP and evade or shift rate limits.
 

@@ -1,7 +1,6 @@
 package com.warrantyvault.storage;
 
 import com.cloudinary.Cloudinary;
-import com.cloudinary.AuthToken;
 import com.cloudinary.utils.ObjectUtils;
 import com.warrantyvault.common.ApiException;
 import java.io.IOException;
@@ -23,8 +22,9 @@ import org.springframework.stereotype.Service;
 @Service
 @ConditionalOnProperty(name = "app.storage.provider", havingValue = "cloudinary")
 public class CloudinaryStorageService implements StorageService {
+    private static final String BILL_FOLDER = "Home/bills";
     private static final Pattern KEY = Pattern.compile(
-        "warrantyvault/([A-Za-z0-9_-]+)/([0-9a-f-]+)\\.(jpg|png|webp)");
+        "Home/bills/([A-Za-z0-9_-]+)/([0-9a-f-]+)\\.(jpg|png|webp)");
     private static final Pattern CLOUDINARY_URL = Pattern.compile(
         "cloudinary://[^:@/]+:[^@/]+@[A-Za-z0-9_-]+");
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
@@ -66,7 +66,7 @@ public class CloudinaryStorageService implements StorageService {
         if (spaceId == null || !spaceId.matches("[A-Za-z0-9_-]+")) {
             throw new ApiException("INVALID_PATH", "Invalid storage path", 400);
         }
-        String publicId = "warrantyvault/" + spaceId + "/" + UUID.randomUUID();
+        String publicId = BILL_FOLDER + "/" + spaceId + "/" + UUID.randomUUID();
         try {
             client.upload(bytes, Map.of(
                 "public_id", publicId,
@@ -166,7 +166,7 @@ public class CloudinaryStorageService implements StorageService {
         @Override
         public String signedUrl(String publicId, String extension) {
             return cloudinary.url().secure(true).resourceType("image").type("authenticated")
-                .signed(true).authToken(new AuthToken(cloudinary.config.apiSecret).duration(60))
+                .signed(true)
                 .format(extension).generate(publicId);
         }
 

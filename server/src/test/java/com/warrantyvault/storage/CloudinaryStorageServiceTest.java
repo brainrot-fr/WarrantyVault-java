@@ -5,8 +5,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import com.warrantyvault.common.ApiException;
 import java.io.ByteArrayInputStream;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 
@@ -23,7 +21,7 @@ class CloudinaryStorageServiceTest {
 
         assertEquals("image/jpeg", stored.contentType());
         assertEquals(3, stored.sizeBytes());
-        assertEquals("warrantyvault/space-123/" + client.publicId.substring(client.publicId.lastIndexOf('/') + 1) + ".jpg",
+        assertEquals("Home/bills/space-123/" + client.publicId.substring(client.publicId.lastIndexOf('/') + 1) + ".jpg",
             stored.key());
         assertEquals("authenticated", client.options.get("type"));
         assertEquals(Boolean.FALSE, client.options.get("overwrite"));
@@ -37,16 +35,26 @@ class CloudinaryStorageServiceTest {
                 new ByteArrayInputStream(new byte[0])));
 
         ApiException missing = assertThrows(ApiException.class,
-            () -> storage.open("warrantyvault/space/00000000-0000-0000-0000-000000000000.jpg"));
+            () -> storage.open("Home/bills/space/00000000-0000-0000-0000-000000000000.jpg"));
         assertEquals("FILE_NOT_FOUND", missing.getCode());
 
         CloudinaryStorageService unavailable = new CloudinaryStorageService(client,
             (url, timeout) -> new CloudinaryStorageService.FetchResult(503,
                 new ByteArrayInputStream(new byte[0])));
         ApiException upstream = assertThrows(ApiException.class,
-            () -> unavailable.open("warrantyvault/space/00000000-0000-0000-0000-000000000000.jpg"));
+            () -> unavailable.open("Home/bills/space/00000000-0000-0000-0000-000000000000.jpg"));
         assertEquals("STORAGE_UPSTREAM_FAILED", upstream.getCode());
         assertEquals(502, upstream.getStatus());
+    }
+
+    @Test
+    void opensCloudinaryKeysInBillsFolder() throws Exception {
+        FakeClient client = new FakeClient();
+        CloudinaryStorageService storage = new CloudinaryStorageService(client,
+            (url, timeout) -> new CloudinaryStorageService.FetchResult(200,
+                new ByteArrayInputStream(new byte[] {1})));
+
+        storage.open("Home/bills/space/00000000-0000-0000-0000-000000000000.jpg").close();
     }
 
     @Test
@@ -60,7 +68,7 @@ class CloudinaryStorageServiceTest {
             () -> storage.open("../outside.jpg"));
         assertEquals("INVALID_PATH", invalid.getCode());
         client.destroyResult = "not found";
-        storage.delete("warrantyvault/space/00000000-0000-0000-0000-000000000000.jpg");
+        storage.delete("Home/bills/space/00000000-0000-0000-0000-000000000000.jpg");
     }
 
     @Test
