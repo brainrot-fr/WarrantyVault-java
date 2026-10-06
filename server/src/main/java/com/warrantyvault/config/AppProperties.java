@@ -10,15 +10,12 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.beans.factory.annotation.Value;
 
 @Data
 @Component
 @Validated
 @ConfigurationProperties(prefix = "app")
 public class AppProperties {
-    @Value("${spring.profiles.active:}")
-    private String activeProfile;
     private String jwtSecret;
     @Valid private Storage storage = new Storage();
     @Valid private Cookie cookie = new Cookie();
@@ -58,8 +55,7 @@ public class AppProperties {
         if (jwtSecret == null
             || jwtSecret.getBytes(StandardCharsets.UTF_8).length < 32
             || "local-only-secret-key-for-warrantyvault-mvp".equals(jwtSecret)) {
-            String variable = "prod".equals(activeProfile) ? "JWT_SECRET" : "APP_JWT_SECRET";
-            throw new IllegalStateException(variable + " must be set to a secret of at least 32 UTF-8 bytes.");
+            throw new IllegalStateException("APP_JWT_SECRET must be set to a secret of at least 32 UTF-8 bytes.");
         }
         if ("None".equalsIgnoreCase(cookie.getSameSite()) && !cookie.isSecure()) {
             throw new IllegalStateException("SameSite=None refresh cookies require APP_COOKIE_SECURE=true.");
