@@ -16,8 +16,10 @@ import lombok.RequiredArgsConstructor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 
 @Service
+@ConditionalOnProperty(name = "app.storage.provider", havingValue = "local", matchIfMissing = true)
 @RequiredArgsConstructor
 public class LocalStorageService implements StorageService {
     private static final Logger logger = LoggerFactory.getLogger(LocalStorageService.class);
