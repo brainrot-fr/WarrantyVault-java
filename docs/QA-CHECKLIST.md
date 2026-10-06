@@ -1,5 +1,14 @@
 # Manual QA checklist
 
+## Phase 0 audit checks
+
+- [ ] Starting from Overview with no Space, record four route renders and five navigation/action clicks to create the first Space and first product.
+- [ ] Confirm the current add-product route is only reachable through Spaces → Space → Add product, and that the header has no global Add product action.
+- [ ] Confirm the current product list has search, status, and sort controls but no type control, and that changing them does not update the URL.
+- [ ] Confirm the product form has four fieldsets and that the required bill appears in the Documents fieldset after the other product fields.
+- [ ] Confirm labels show `(required)` or `(optional)`, status rendering differs between Overview and Space, loading uses text, and successful saves use inline feedback rather than toasts.
+- [ ] Confirm Create Space is below the Space list, invitation acceptance has a raw code input without normalization help, and mobile has no bottom tab bar or dark-theme toggle.
+
 ## Frontend behavior
 
 - [ ] Open a product with a bill and select **Open full size**. Confirm the image opens in a new tab and the WarrantyVault page remains open.
