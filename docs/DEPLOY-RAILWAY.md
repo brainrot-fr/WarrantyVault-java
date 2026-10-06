@@ -1,151 +1,165 @@
-# WarrantyVault on Railway
+# Deploy WarrantyVault to Railway
 
-**Official documentation checked: 2026-10-06.** This guide checked the current Railway Dockerfile, variables/reference, deployments, GitHub integration, and healthcheck documentation, and Cloudinary upload/media-access-control documentation. Railway and Cloudinary occasionally rename menus; if a label differs, use the current official docs and look for the equivalent GitHub access, Variables, Deploy, Healthcheck, or API credentials screen.
+**Official documentation verified: 2026-10-06.** References: [Railway services](https://docs.railway.com/services#deploying-from-a-github-repo), [Dockerfiles](https://docs.railway.com/builds/dockerfiles), [config as code](https://docs.railway.com/config-as-code/reference), [variables](https://docs.railway.com/variables), [private networking](https://docs.railway.com/networking/private-networking), [MySQL](https://docs.railway.com/databases/mysql), [TCP Proxy](https://docs.railway.com/networking/tcp-proxy), [domains](https://docs.railway.com/networking/domains), [deployments](https://docs.railway.com/deployments/deployment-actions), [GitHub autodeploys](https://docs.railway.com/deployments/github-autodeploys), and [Cloudinary credentials](https://cloudinary.com/documentation/finding_your_credentials_tutorial), [SDK environment variable](https://cloudinary.com/documentation/cloudinary_sdks#environment_variable), [media access](https://cloudinary.com/documentation/control_access_to_media), [Media Library](https://cloudinary.com/documentation/asset_management), and [billing](https://cloudinary.com/documentation/billing_and_plans). Railway and Cloudinary may rename buttons; follow the current official page and choose the equivalent Source, Variables, Deploy, Healthcheck, API Keys, or Media Library screen.
 
-This deployment uses a **new Railway project** with one GitHub-connected app service (the jar also serves the vanilla frontend), one new Railway MySQL service, and Cloudinary authenticated image assets. The old Railway project remains the migration source until the new project passes verification. The browser never receives a Cloudinary URL. `ProductController` remains the authenticated image stream.
+This architecture has one Railway app service. Its Spring Boot jar serves both the API and vanilla frontend, so the browser uses one origin and no CORS configuration is needed. MySQL stores records; Cloudinary stores authenticated bill and warranty-card images. Cloudinary URLs are never sent to the browser: `ProductController` streams images through the authenticated endpoint.
 
-## 1. Create the new Railway project and connect GitHub
+## 0. Prepare `main` before touching Railway
 
-1. In Railway, choose **New Project** (or **Create Project**) and enter `<NEW_RAILWAY_PROJECT_NAME>`. Do not reuse or delete the old project yet.
-2. Open Railway account settings, **Integrations**, then the GitHub integration (the label may be **Connected accounts**).
-3. Choose **Configure** or **Manage access**, grant the Railway GitHub App access to organization `warrantyvault` and repository `warrantyvault/WarrantyVault-java`. An organization owner may need to approve the request in GitHub organization settings.
-4. In the new project choose **Deploy from GitHub repo**, select `warrantyvault/WarrantyVault-java`, and choose branch `main`. Name the service `<NEW_APP_SERVICE_NAME>` (for example `WarrantyVault`).
-5. In the app service's **Settings > Source** (or the current Source/Repository screen), confirm repository `warrantyvault/WarrantyVault-java`, branch `main`, and Root Directory `/`. Do not set the root directory to `server`; the root Dockerfile copies the `server/` Maven project.
-6. Push a harmless commit to `main`. Confirm the new project creates a deployment automatically. This confirms the new GitHub integration and auto deploy; do not use the old project's “Could not load branches” state as evidence.
+1. Merge the commits for production configuration, the Dockerfile/Railway health configuration, and Cloudinary storage into `main`.
+2. On your workstation, run `git switch main && git pull --ff-only`, then confirm:
 
-## 2. Add a new MySQL service and migrate the database
+   ```sh
+   test -f Dockerfile && test -f railway.json && git status --short
+   ```
 
-1. In the new project choose **Add Service > Database > MySQL** (menu names may be **New > Database**), name it `<NEW_MYSQL_SERVICE_NAME>` (for example `MySQL`), and wait until its volume, Backups tab, and variables are available.
-2. The old app's default database may contain unrelated tables. In the **new** MySQL service create a new database and user:
+   The command must find both files and `git status` must be clean. A first deploy without the root `Dockerfile` and `railway.json` fails or uses the wrong build context; the Maven project is under `server/`, not the repository root.
 
-```sql
-CREATE DATABASE warrantyvault_prod CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-CREATE USER 'warrantyvault_app'@'%' IDENTIFIED BY '<DB_PASSWORD>';
-GRANT ALL PRIVILEGES ON warrantyvault_prod.* TO 'warrantyvault_app'@'%';
-FLUSH PRIVILEGES;
-```
+## 1. Give Railway access to GitHub
 
-Run this from the new MySQL service's current **Data/Console/Query** view (Railway may rename it), or from a local client through its TCP proxy:
+1. Sign in to Railway and open account **Settings > GitHub** (the label may be **Integrations** or **Connected accounts**).
+2. Choose **Install/Configure Railway GitHub App**. In GitHub, select the `warrantyvault` organization and grant access to `warrantyvault/WarrantyVault-java` (or all repositories only if that is your policy).
+3. If GitHub says approval is required, ask an organization owner to approve the pending third-party application request in the organization settings. Do not continue until it is approved.
+4. Return to Railway, refresh the repository picker, and verify that `warrantyvault/WarrantyVault-java` and branch `main` are listed. If they are absent, repeat the app installation with the organization selected; do not create a different repository.
 
-```sh
-mysql --host=<MYSQL_TCP_PROXY_HOST> --port=<MYSQL_TCP_PROXY_PORT> \
-  --user=<MYSQL_ROOT_USER> --password
-```
+## 2. Create the Railway project
 
-Paste the SQL, verify with `SHOW DATABASES;` and `SHOW GRANTS FOR 'warrantyvault_app'@'%';`, then turn the TCP proxy off. Never commit the password or leave a public proxy enabled.
+1. Choose **New Project > Deploy from GitHub repo** (current UI may say **Create Project** or **Connect Repo**).
+2. Select `warrantyvault/WarrantyVault-java`, branch `main`, and name the app service `<APP_SERVICE_NAME>`.
+3. Leave the root directory as `/`. Do not set it to `server`: the root Dockerfile copies `server/mvnw`, `server/pom.xml`, and `server/src`.
+4. The first build reads `railway.json`, builds the multi-stage Temurin JDK 21 image, and creates the jar. A failure before variables are configured is expected because the prod profile requires `DB_URL`, `MYSQL_USER`, `MYSQL_PASSWORD`, and `APP_JWT_SECRET`; continue to the next steps before diagnosing startup.
 
-If the old project contains data to preserve, make a dump from the old MySQL service before changing it:
+## 3. Add MySQL in the same project
 
-```sh
-mysqldump --host=<OLD_MYSQL_TCP_PROXY_HOST> --port=<OLD_MYSQL_TCP_PROXY_PORT> \
-  --user=<OLD_MYSQL_USER> --password \
-  --single-transaction --routines --triggers <OLD_DATABASE_NAME> > warrantyvault-old.sql
-```
+1. In the project choose **Add Service > Database > MySQL** (the current equivalent may be **New > Database**). Name it `<MYSQL_SERVICE_NAME>`, for example `MySQL`.
+2. Open that service's **Variables**. The generated connection values are `MYSQLHOST`, `MYSQLPORT`, `MYSQLUSER`, `MYSQLPASSWORD`, and `MYSQLDATABASE`. They are available to other services through Railway references.
+3. The default database is empty. That is intentional: Flyway creates WarrantyVault's schema on the first successful app start. Confirm the database charset with a MySQL client:
 
-Turn off the old TCP proxy, inspect the dump for unrelated schemas, and restore only the WarrantyVault data into the new database:
+   ```sql
+   SELECT DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME
+   FROM information_schema.SCHEMATA
+   WHERE SCHEMA_NAME = '<MYSQL_DATABASE_NAME>';
+   ```
 
-```sh
-mysql --host=<NEW_MYSQL_TCP_PROXY_HOST> --port=<NEW_MYSQL_TCP_PROXY_PORT> \
-  --user=<NEW_MYSQL_ADMIN_USER> --password warrantyvault_prod < warrantyvault-old.sql
-```
+   If it is not `utf8mb4`, run:
 
-For a genuinely clean migration, do not restore the old schema: let Flyway create `warrantyvault_prod` during the first deploy. Confirm the new database is empty with `SHOW TABLES;` before deploying. Never point the new service at the old project's database.
+   ```sql
+   ALTER DATABASE `<MYSQL_DATABASE_NAME>` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+   ```
 
-## 3. Configure Cloudinary
+4. For an optional least-privilege user, connect as the generated admin and run:
 
-Create the free account at Cloudinary. In the Console, open **Settings > Product environment > API Keys** (names may be **Account details**). Copy the cloud name, API key, and API secret. Form exactly:
+   ```sql
+   CREATE USER '<APP_DB_USER>'@'%' IDENTIFIED BY '<APP_DB_PASSWORD>';
+   GRANT ALL PRIVILEGES ON `<MYSQL_DATABASE_NAME>`.* TO '<APP_DB_USER>'@'%';
+   FLUSH PRIVILEGES;
+   ```
 
-```text
-cloudinary://<CLOUDINARY_API_KEY>:<CLOUDINARY_API_SECRET>@<CLOUDINARY_CLOUD_NAME>
-```
+   Private networking uses Railway's internal hostname and is the app's normal path. The public TCP Proxy is for temporary external tools such as `mysql` and `mysqldump`; enable it only while needed, restrict access if Railway offers that control, and disable it afterward. Do not put proxy host/port in `DB_URL`.
 
-Set it only as the Railway secret `CLOUDINARY_URL`. Do not put it in frontend code, Git, logs, or this document. Uploads use `type=authenticated`: originals and derived assets require signed access, unlike public assets. Check account security settings, delivery-type restrictions, and the usage dashboard. After the first smoke test, confirm the asset under **Media Library** in folder `warrantyvault/<space-id>`; it should not be anonymously fetchable.
+## 4. Create and configure Cloudinary
 
-To rotate the secret, create/rotate the API secret in the API key/account screen, update the sealed Railway `CLOUDINARY_URL`, redeploy, and revoke the old secret only after the new deployment passes. Watch the free-plan storage, monthly bandwidth, transformations, and Admin API quota in the current Cloudinary usage/billing page; quotas and plan names can change.
+1. Create a free Cloudinary account. In the Console open **Settings > Product environment > API Keys** (or **Account details/API Keys**).
+2. Copy the **cloud name**, **API key**, and **API secret**. Form this value, without spaces:
 
-## 4. Configure variables on the new app service
+   ```text
+   cloudinary://<CLOUDINARY_API_KEY>:<CLOUDINARY_API_SECRET>@<CLOUDINARY_CLOUD_NAME>
+   ```
 
-In `<NEW_APP_SERVICE_NAME>` open **Variables** and add these to the app service. Use **sealed/hidden** for every value containing a password, token, key, or URL with credentials when Railway offers that option. Reference the new service name exactly as Railway displays it; if it contains spaces, use Railway's generated reference syntax from the variable editor.
+3. Cloudinary's `authenticated` delivery type is private: an unsigned public delivery URL must not work. WarrantyVault signs a short-lived URL on the server, downloads the bytes, and returns them only from the authenticated product image route. No transformation is requested.
+4. In Cloudinary account/security settings, review allowed delivery types and API access. After the first upload, open **Media Library** and confirm an asset under `warrantyvault/<space-id>`. Do not paste the secret into the browser, repository, issue tracker, or logs.
+5. To rotate the secret, create a new API secret/key pair, replace the sealed Railway `CLOUDINARY_URL`, redeploy, smoke-test an image, then revoke the old pair. Watch the free plan's storage, bandwidth, transformations, and Admin API limits in the current Usage/Billing screen; free quotas and names can change.
 
-| Name | Exact value | Source | Required |
+## 5. Add app variables
+
+Open `<APP_SERVICE_NAME> > Variables`. Enter these exact values. Replace `<MYSQL_SERVICE_NAME>` with the service name shown by Railway (for example `MySQL`). Mark passwords, tokens, and credential-bearing URLs as **sealed/hidden** when that option exists.
+
+| Name | Value | Comes from | Required |
 |---|---|---|---|
 | `SPRING_PROFILES_ACTIVE` | `prod` | Fixed | Yes |
-| `DB_URL` | `jdbc:mysql://${{<NEW_MYSQL_SERVICE_NAME>.MYSQLHOST}}:${{<NEW_MYSQL_SERVICE_NAME>.MYSQLPORT}}/warrantyvault_prod?useSSL=true&requireSSL=true&serverTimezone=UTC&characterEncoding=utf8&connectionCollation=utf8mb4_unicode_ci` | New MySQL service reference variables | Yes |
-| `DB_USER` | `warrantyvault_app` | User created above | Yes |
-| `DB_PASSWORD` | `<DB_PASSWORD>` | User created above | Yes |
-| `JWT_SECRET` | `<output of openssl rand -base64 48>` | Generate locally | Yes |
+| `DB_URL` | `jdbc:mysql://${{<MYSQL_SERVICE_NAME>.MYSQLHOST}}:${{<MYSQL_SERVICE_NAME>.MYSQLPORT}}/${{<MYSQL_SERVICE_NAME>.MYSQLDATABASE}}?useSSL=true&requireSSL=true&serverTimezone=UTC&characterEncoding=utf8&connectionCollation=utf8mb4_unicode_ci` | MySQL reference variables | Yes |
+| `MYSQL_USER` | `${{<MYSQL_SERVICE_NAME>.MYSQLUSER}}` | MySQL reference | Yes |
+| `MYSQL_PASSWORD` | `${{<MYSQL_SERVICE_NAME>.MYSQLPASSWORD}}` | MySQL reference | Yes |
+| `APP_JWT_SECRET` | `<output of openssl rand -base64 48>` | Generate locally | Yes |
 | `APP_COOKIE_SECURE` | `true` | Fixed for HTTPS | Yes |
 | `APP_SEED_DEMO_DATA` | `false` | Fixed | Yes |
 | `APP_STORAGE_PROVIDER` | `cloudinary` | Fixed | Yes |
-| `CLOUDINARY_URL` | `cloudinary://<API_KEY>:<API_SECRET>@<CLOUD_NAME>` | Cloudinary API Keys | Yes |
-| `PORT` | *(leave unset)* | Railway injects the target port | Optional |
+| `CLOUDINARY_URL` | `cloudinary://<CLOUDINARY_API_KEY>:<CLOUDINARY_API_SECRET>@<CLOUDINARY_CLOUD_NAME>` | Cloudinary API Keys | Yes |
+| `PORT` | leave unset | Railway injects it | Optional |
 
-Generate the JWT secret without recording it:
+Generate the JWT secret and paste the output directly into the sealed variable field:
 
 ```sh
 openssl rand -base64 48
 ```
 
-Delete `CORS_ALLOWED_ORIGINS`, all old-project `DB_URL`, `DB_USER`, and `DB_PASSWORD` values, and any other unused legacy variables before the first deploy. Do not copy the old project's `MYSQL_*` variables into the app service; use references to the new MySQL service. Do not add CORS support: the app and browser share one origin. `app.storage.provider` is the Spring environment property represented by `APP_STORAGE_PROVIDER`.
+Railway's **Raw Editor** can paste a complete variable block in bulk; verify the preview before saving. Do not add CORS variables. The same-origin design does not need CORS. The app keeps SameSite `Lax`; `APP_COOKIE_SECURE=true` makes the refresh cookie HTTPS-only.
 
-## 5. Service settings
+## 6. Service settings
 
-Open `<NEW_APP_SERVICE_NAME> > Settings`:
+In `<APP_SERVICE_NAME> > Settings`, verify:
 
-* Source: repository `warrantyvault/WarrantyVault-java`, branch `main`, Root Directory `/`.
-* Build: **Dockerfile** builder, path `/Dockerfile` (the committed `railway.json` selects it).
-* Networking: choose **Generate Domain** and record `<NEW_RAILWAY_DOMAIN>`; target port is the injected `PORT` (normally 8080). The container binds `0.0.0.0`.
-* Deploy: healthcheck path `/api/health`; restart policy **ON_FAILURE**, maximum retries `5`.
-* Region: choose the region nearest users and the MySQL service. If the UI uses a different label, choose the app's deployment region setting.
+* Source repository `warrantyvault/WarrantyVault-java`, branch `main`, root `/`.
+* Builder **Dockerfile**, path `/Dockerfile`; `railway.json` selects this automatically.
+* **Generate Domain** and record `https://<RAILWAY_DOMAIN>`. Target port is Railway's injected `PORT` (normally 8080); the app binds `0.0.0.0`.
+* Healthcheck path `/api/health`.
+* Restart policy `ON_FAILURE`, maximum retries `5`.
+* Region near your users and the MySQL service. If the label differs, use the current deployment-region setting.
 
-## 6. Deploy and verify
+## 7. Deploy and verify
 
-Click **Deploy** or push to `main`. Logs should show Flyway applying migrations to the empty `warrantyvault_prod` schema, storage provider `cloudinary`, and no startup exception. Confirm:
-
-```sh
-curl -i https://<NEW_RAILWAY_DOMAIN>/api/health
-# 200 and {"status":"UP"}
-```
-
-In a private browser window, register, create a Space, add a product with a bill, confirm the asset appears in Cloudinary Media Library, and confirm the bill displays in the app. Do not copy a Cloudinary delivery URL into the browser. Redeploy, then confirm login, the product, and its image still exist.
-
-### Migration cutover
-
-If the old project had live users, schedule a short maintenance window. Announce read-only/freeze time, stop the old app service, take one final old-project MySQL dump, restore it into the new project's `warrantyvault_prod`, and redeploy the new app. Repeat the health, login, product, and image checks. Then point the production/custom DNS name at the new Railway domain, wait for TLS, and run `curl -i https://<NEW_RAILWAY_DOMAIN>/api/health` again. Keep the old project and its MySQL backup for the agreed rollback window; only then remove the old public domain, disable its deployment, and delete its service/volume.
-
-## 7. Backups and restore
-
-Use the MySQL service's **Backups** tab to create/verify scheduled backups and test a restore into a separate database before an incident. A manual dump through a private TCP connection is:
+Deploy from the Railway UI or push a commit to `main`. In logs expect Flyway migrations to apply to the empty database, a Cloudinary storage-provider startup line, and no startup exception. Verify the public health route:
 
 ```sh
-mysqldump --host=<MYSQL_TCP_PROXY_HOST> --port=<MYSQL_TCP_PROXY_PORT> \
-  --user=warrantyvault_app --password \
-  --single-transaction --routines --triggers warrantyvault_prod > warrantyvault-$(date +%F).sql
+curl -i https://<RAILWAY_DOMAIN>/api/health
+# HTTP 200
+# {"status":"UP"}
 ```
 
-Turn the proxy off afterward and store the dump encrypted. Restore with `mysql ... warrantyvault_prod < backup.sql`, then redeploy/restart the app. Cloudinary is the other half of a full backup: retain an approved Cloudinary asset export/backup or provider-supported recovery plan alongside the database dump. A database-only restore leaves image keys without image data.
+In a private browser window: register, create a Space, add a product with a bill, confirm the asset appears in Cloudinary under `warrantyvault/<space-id>`, and confirm the bill displays in the app. Inspect the browser network response: it should be the authenticated `/api/products/<id>/images/bill` response, never a Cloudinary URL. Trigger **Redeploy** once more and repeat the image check; both database data and the image must survive.
 
-## 8. Optional custom domain
+`server.forward-headers-strategy=native` makes the servlet request scheme and remote address reflect Railway's proxy headers, so `RateLimitFilter` buckets by the real client IP. This relies on Railway being the trusted proxy. Do not expose the app directly without a trusted proxy: a client that can inject `Forwarded`/`X-Forwarded-For` can spoof the bucket IP and evade or shift rate limits.
 
-In service **Settings > Networking**, choose **Custom domain**, enter `<YOUR_DOMAIN>`, and create the DNS record Railway shows. Wait for TLS to become active, then test `/api/health`. Cookies remain secure and same-origin; users must use the custom HTTPS host consistently. Do not turn `APP_COOKIE_SECURE` off.
+## 8. Auto deploy and rollback
 
-## 9. Rollback and cost checklist
+With the GitHub source connected, pushes to `main` auto-deploy. Confirm the deployment list shows the commit SHA after a test push. To roll back, open the last known-good deployment, choose **Redeploy/Rollback** (the current equivalent may be **Deploy this version**), wait for healthcheck success, then fix or revert the bad commit on `main` so the repository and running service converge.
 
-To roll back, open Deployments in the **new** project, choose the last known-good image/commit, and redeploy it. If the database migration is incompatible, restore the matching new-project MySQL backup first; migrations have no down-migrations. Keep Cloudinary assets and database dump from the same recovery point. Keep the old project untouched until the new deployment has passed the smoke test and one redeploy/recovery test.
+## 9. Backups and restore
 
-Weekly, review Railway compute/runtime, MySQL volume and backup usage, egress, and deployment logs; review Cloudinary storage, bandwidth, transformations, and API quota. Set provider spending/usage alerts where available, remove unused deployments, and keep the Cloudinary free plan's limits visible to the operator.
+Enable and review Railway MySQL volume/database backups in the service's **Backups** tab and test a restore into a non-production database. For an external dump, temporarily enable the MySQL TCP Proxy and run:
 
-## 10. Troubleshooting
+```sh
+mysqldump --host=<TCP_PROXY_HOST> --port=<TCP_PROXY_PORT> \
+  --user=<MYSQL_USER> --password --single-transaction --routines --triggers \
+  <MYSQL_DATABASE_NAME> > warrantyvault-<YYYY-MM-DD>.sql
+mysql --host=<TCP_PROXY_HOST> --port=<TCP_PROXY_PORT> \
+  --user=<MYSQL_USER> --password <MYSQL_DATABASE_NAME> < warrantyvault-<YYYY-MM-DD>.sql
+```
+
+Disable the proxy after the operation and keep dumps encrypted. A complete backup has two halves: the MySQL dump/backup **and Cloudinary assets**. Cloudinary is the image source of truth; retain its account/versioned-asset backup or export plan as appropriate for the plan. The local README backup instructions remain for local disk mode; production uses this MySQL plus Cloudinary procedure.
+
+## 10. Optional custom domain
+
+In the app service **Networking/Domains**, add `<CUSTOM_DOMAIN>` and follow the displayed DNS records. Keep HTTPS enabled. The cookie is host-scoped by default, so users may need to sign in again after switching from the Railway domain; `Secure` and SameSite `Lax` still apply. Do not broaden cookie domain settings unless every subdomain is trusted.
+
+## 11. Cost-watching checklist
+
+* Railway: review service usage, build minutes, egress, MySQL volume size, backup retention, and the selected region monthly.
+* Cloudinary: review storage, bandwidth, transformations, Admin API calls, and the free-plan quota dashboard before load tests.
+* Set billing alerts/budgets where available, remove unused preview deployments and TCP proxies, and keep upload limits at the application default (10 MB per image).
+* Verify that authenticated delivery and the backend stream do not accidentally create public transformed copies.
+
+## 12. Troubleshooting
 
 | Symptom | Check and fix |
 |---|---|
-| Flyway says schema is non-empty | `DB_URL` must name `warrantyvault_prod`, not the old default. Create/use the clean database above; do not delete unrelated production data. |
-| Access denied | Verify `DB_USER`/`DB_PASSWORD`, host/port references, and `SHOW GRANTS`; the app user needs privileges only on `warrantyvault_prod.*`. |
-| 502 or “application failed to respond” | Check logs for startup failure, Docker build, `server.address=0.0.0.0`, and injected `PORT`; do not hard-code a different public port. |
-| Login works but session is lost | Keep `APP_COOKIE_SECURE=true`, use HTTPS, and keep `server.forward-headers-strategy=native`; inspect that the refresh cookie is Secure and SameSite=Lax. |
-| Everyone is rate limited | Railway's native forwarded-header handling must be active. The filter buckets `request.getRemoteAddr()` per real client IP; do not allow clients to supply arbitrary forwarded headers through another proxy. |
-| Cloudinary 401/signature errors | Rebuild `CLOUDINARY_URL` from the current cloud name/API key/secret, update the sealed variable, and redeploy. Never print the URL. |
-| Upload 413 | Check Railway/proxy limits and the app's 10 MB image / 25 MB multipart limits; use a smaller JPEG/PNG/WebP. |
-| Image 404 after redeploy | Confirm `APP_STORAGE_PROVIDER=cloudinary` and `storage provider cloudinary` in startup logs. `local` points at ephemeral container disk. |
-
-Cloudinary delivery URLs are signed and short-lived, but the browser receives only the backend response; the authenticated product image endpoint remains the access boundary.
+| Build cannot find the project | Repository root must be `/`; `Dockerfile` and `railway.json` must be on `main`. Do not set root to `server`. |
+| Flyway errors | Confirm the database is empty or contains this app's schema, `utf8mb4`, and a reachable private host. Do not point at an old project's database. |
+| Access denied / unknown database | Check `MYSQL_USER`, `MYSQL_PASSWORD`, and `${{<MYSQL_SERVICE_NAME>.MYSQLDATABASE}}`; verify grants and that `DB_URL` uses the internal host/port. |
+| 502 / application failed to respond | Confirm prod profile, `server.address=0.0.0.0`, and the injected `PORT`; do not hard-code another port in Railway. |
+| Login works but session is lost | Use HTTPS, set `APP_COOKIE_SECURE=true`, keep SameSite `Lax`, and retain `server.forward-headers-strategy=native`. |
+| Everyone is rate limited | Check trusted Railway forwarded headers and the proxy path; untrusted clients must not be able to spoof `Forwarded` or `X-Forwarded-For`. |
+| Cloudinary 401/signature errors | Re-form `CLOUDINARY_URL`, rotate/re-enter the API secret, verify cloud name, and ensure authenticated delivery is enabled. Never log the URL. |
+| Upload 413 | The application accepts images up to 10 MB and total multipart requests up to 25 MB; check the file and any current proxy limit. |
+| Image 404 after redeploy | Confirm `APP_STORAGE_PROVIDER=cloudinary`, not `local`; local disk is ephemeral on a Railway redeploy. Check the asset in Media Library. |
+| Healthcheck failing | `GET /api/health` must be public and return 200. Check the generated domain, target `PORT`, bind address, startup logs, and that the health path is exactly `/api/health`. |

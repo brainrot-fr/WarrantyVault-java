@@ -75,7 +75,15 @@ mysqldump warrantyvault > backup.sql
 cp -a ./uploads ./uploads-backup
 ```
 
-Restore the database and uploads directory together for local storage. In Railway, use the MySQL Backups tab for the database and Cloudinary's account/export tooling or a separately maintained asset backup for images; both halves are required. Schema migrations are additive but do not include down-migrations. See [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md).
+Restore the database and uploads directory together for local storage. For Railway, enable the MySQL service backup and, when an external dump is needed, temporarily use its TCP Proxy:
+
+```sh
+mysqldump --host=<TCP_PROXY_HOST> --port=<TCP_PROXY_PORT> \
+  --user=<MYSQL_USER> --password --single-transaction --routines --triggers \
+  <MYSQL_DATABASE_NAME> > warrantyvault-<YYYY-MM-DD>.sql
+```
+
+Disable the proxy afterward. Cloudinary authenticated assets are the other half of a production backup; retain a Cloudinary asset/version backup or export plan as well as the MySQL backup. Schema migrations are additive but do not include down-migrations. See [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md).
 
 ## Deployment
 
