@@ -70,6 +70,7 @@ public class CloudinaryStorageService implements StorageService {
         try {
             client.upload(bytes, Map.of(
                 "public_id", publicId,
+                "asset_folder", BILL_FOLDER,
                 "resource_type", "image",
                 "type", "authenticated",
                 "format", format.extension(),
