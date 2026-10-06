@@ -66,7 +66,8 @@ public class CloudinaryStorageService implements StorageService {
         if (spaceId == null || !spaceId.matches("[A-Za-z0-9_-]+")) {
             throw new ApiException("INVALID_PATH", "Invalid storage path", 400);
         }
-        String publicId = BILL_FOLDER + "/" + spaceId + "/" + UUID.randomUUID();
+        String publicId = spaceId + "/" + UUID.randomUUID();
+        String storageKey = BILL_FOLDER + "/" + publicId + "." + format.extension();
         try {
             client.upload(bytes, Map.of(
                 "public_id", publicId,
@@ -77,7 +78,7 @@ public class CloudinaryStorageService implements StorageService {
                 "overwrite", false,
                 "use_filename", false,
                 "unique_filename", false));
-            return new StoredFile(publicId + "." + format.extension(), format.contentType(), bytes.length);
+            return new StoredFile(storageKey, format.contentType(), bytes.length);
         } catch (Exception exception) {
             throw new ApiException("STORAGE_UPSTREAM_FAILED", "Image storage is unavailable", 502);
         }

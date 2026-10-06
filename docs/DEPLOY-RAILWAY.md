@@ -67,7 +67,7 @@ This architecture has one Railway app service. Its Spring Boot jar serves both t
    ```
 
 3. Cloudinary's `authenticated` delivery type is private: an unsigned public delivery URL must not work. WarrantyVault signs a short-lived URL on the server, downloads the bytes, and returns them only from the authenticated product image route. No transformation is requested.
-4. In Cloudinary account/security settings, review allowed delivery types and API access. After the first upload, open **Media Library** and confirm an asset under `Home/bills/<space-id>`. Do not paste the secret into the browser, repository, issue tracker, or logs.
+4. In Cloudinary account/security settings, review allowed delivery types and API access. After the first upload, open **Media Library** and confirm an asset under `Home/bills/<space-id>`. The Cloudinary public ID is `<space-id>/<file-id>`; `Home/bills` is set as the asset folder separately to avoid duplicated folder paths. Do not paste the secret into the browser, repository, issue tracker, or logs.
 5. To rotate the secret, create a new API secret/key pair, replace the sealed Railway `CLOUDINARY_URL`, redeploy, smoke-test an image, then revoke the old pair. Watch the free plan's storage, bandwidth, transformations, and Admin API limits in the current Usage/Billing screen; free quotas and names can change.
 
 ## 5. Add app variables

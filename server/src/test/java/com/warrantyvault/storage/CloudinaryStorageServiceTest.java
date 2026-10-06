@@ -23,6 +23,8 @@ class CloudinaryStorageServiceTest {
         assertEquals(3, stored.sizeBytes());
         assertEquals("Home/bills/space-123/" + client.publicId.substring(client.publicId.lastIndexOf('/') + 1) + ".jpg",
             stored.key());
+        assertEquals("space-123/" + client.publicId.substring(client.publicId.lastIndexOf('/') + 1),
+            client.publicId);
         assertEquals("authenticated", client.options.get("type"));
         assertEquals("Home/bills", client.options.get("asset_folder"));
         assertEquals(Boolean.FALSE, client.options.get("overwrite"));
