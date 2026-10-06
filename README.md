@@ -1,6 +1,6 @@
 # WarrantyVault
 
-WarrantyVault is a local-first warranty tracker. It keeps product details and private document images on the computer running the application.
+WarrantyVault is a warranty tracker. Local development stores private document images on the application computer; production can store them as authenticated Cloudinary assets while the backend continues streaming them through authenticated endpoints.
 
 ## Requirements
 
@@ -38,6 +38,7 @@ The `.env` file supports these variables:
 Additional application properties can be supplied through Spring environment variables or `application.properties`:
 
 - `app.storage.local-dir`: upload directory. The default is `./uploads`.
+- `APP_STORAGE_PROVIDER`: `local` by default; set `cloudinary` in production with `CLOUDINARY_URL`.
 - `app.max-upload-bytes`: maximum image size in bytes. The default is 10 MB.
 - `app.expiring-soon-days`: expiring-soon window in days. The default is 30.
 - `app.storage.max-bytes-per-space`: optional per-Space quota in bytes. The default is 2147483648. Set it to `0` to disable the quota.
@@ -63,18 +64,22 @@ make test
 
 ## Where your data lives
 
-Product details, accounts, Spaces, invitations, and refresh sessions are stored in the MariaDB or MySQL database. Uploaded images are stored in the configured upload directory. The absolute upload path is printed in the application startup log. Back up both locations together.
+Product details, accounts, Spaces, invitations, and refresh sessions are stored in the MariaDB or MySQL database. With the default `local` provider, uploaded images are stored in the configured upload directory. With `cloudinary`, images are authenticated Cloudinary assets and are never exposed directly to the browser.
 
 ## Backup and restore
 
-Stop the application before making a consistent backup. Save a database dump and a copy of the upload directory:
+Stop the application before making a consistent local backup. Save a database dump and a copy of the upload directory:
 
 ```sh
 mysqldump warrantyvault > backup.sql
 cp -a ./uploads ./uploads-backup
 ```
 
-Restore the database and uploads directory together. Restoring only one can leave records with missing images or orphaned files. Back up both before upgrading. Schema migrations are additive but do not include down-migrations. To roll back an upgrade, restore the database and uploads backup, then run the previous application build.
+Restore the database and uploads directory together for local storage. In Railway, use the MySQL Backups tab for the database and Cloudinary's account/export tooling or a separately maintained asset backup for images; both halves are required. Schema migrations are additive but do not include down-migrations. See [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md).
+
+## Deployment
+
+See [docs/DEPLOY-RAILWAY.md](docs/DEPLOY-RAILWAY.md) for the Railway, MySQL, Cloudinary, variables, backup, rollback, and troubleshooting runbook.
 
 ## Sharing a Space
 

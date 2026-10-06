@@ -3,11 +3,9 @@ package com.warrantyvault.storage;
 import com.cloudinary.Cloudinary;
 import com.cloudinary.utils.ObjectUtils;
 import com.warrantyvault.common.ApiException;
-import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
-import java.net.URL;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Map;
@@ -19,11 +17,14 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(name = "app.storage.provider", havingValue = "cloudinary")
 public class CloudinaryStorageService implements StorageService {
+    private static final Logger logger = LoggerFactory.getLogger(CloudinaryStorageService.class);
     private static final Pattern KEY = Pattern.compile("warrantyvault/([^/]+)/([0-9a-f-]+)\\.(jpg|png|webp)");
     private static final Duration TIMEOUT = Duration.ofSeconds(10);
 
@@ -38,6 +39,7 @@ public class CloudinaryStorageService implements StorageService {
         }
         try {
             cloudinary = new Cloudinary(cloudinaryUrl);
+            logger.info("Cloudinary storage provider enabled");
         } catch (RuntimeException exception) {
             throw new IllegalStateException("CLOUDINARY_URL is malformed; check the Cloudinary URL format.", exception);
         }
@@ -51,7 +53,6 @@ public class CloudinaryStorageService implements StorageService {
         try {
             cloudinary.uploader().upload(bytes, ObjectUtils.asMap(
                 "public_id", publicId,
-                "folder", "",
                 "resource_type", "image",
                 "type", "authenticated",
                 "format", format.extension(),
