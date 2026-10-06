@@ -1,6 +1,7 @@
 package com.warrantyvault.storage;
 
 import com.cloudinary.Cloudinary;
+import com.cloudinary.AuthToken;
 import com.cloudinary.utils.ObjectUtils;
 import com.warrantyvault.common.ApiException;
 import java.io.IOException;
@@ -163,7 +164,8 @@ public class CloudinaryStorageService implements StorageService {
         @Override
         public String signedUrl(String publicId, String extension) {
             return cloudinary.url().secure(true).resourceType("image").type("authenticated")
-                .signed(true).format(extension).generate(publicId);
+                .signed(true).authToken(new AuthToken(cloudinary.config.apiSecret).duration(60))
+                .format(extension).generate(publicId);
         }
 
         @Override
