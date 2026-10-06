@@ -28,39 +28,3 @@
   color: var(--ink-muted);
   line-height: 1.8;
 }
-.button {
-  min-height: 44px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid transparent;
-  border-radius: var(--radius-control);
-  padding: 0.62rem 1rem;
-  text-decoration: none;
-  font-size: 0.93rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-.button:disabled {
-  opacity: 0.58;
-  cursor: wait;
-}
-.button:focus-visible {
-  outline-offset: 3px;
-}
-.button-primary {
-  background: var(--accent);
-  color: var(--accent-ink);
-}
-.button-primary:hover:not(:disabled) {
-  background: var(--accent-hover);
-}
-.button-quiet {
-  border-color: rgba(40, 43, 39, 0.24);
-  color: var(--ink);
-  background: var(--raised);
-}
-.button-quiet:hover:not(:disabled) {
-  border-color: var(--accent);
-  background: var(--canvas-hover);
-}

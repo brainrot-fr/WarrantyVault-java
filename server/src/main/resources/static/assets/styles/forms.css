@@ -39,7 +39,7 @@
 .field textarea {
   width: 100%;
   min-height: 46px;
-  border: 1px solid #8a8e85;
+  border: 1px solid var(--ink-faint);
   border-radius: var(--radius-control);
   padding: 0.55rem 0.75rem;
   color: var(--ink);
