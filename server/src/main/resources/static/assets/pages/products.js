@@ -5,7 +5,8 @@ import {
   formatDate,
   describeExpiry,
   errorBox,
-  confirmDialog
+  confirmDialog,
+  statusBadge
 } from '../ui.js';
 
 export async function renderProduct(runtime, spaceId, productId) {
@@ -87,6 +88,9 @@ export async function renderProduct(runtime, spaceId, productId) {
       facts.append(element('dt', {}, label), element('dd', {}, value));
     }
     const detail = element('section', {className: 'product-facts'});
+    detail.prepend(statusBadge(
+        product.status.replaceAll('_', ' '),
+        String(product.status).toLowerCase().replaceAll('_', '-')));
     const progress = element('section', {
       className: 'coverage-progress',
       'aria-label': 'Warranty coverage timeline'

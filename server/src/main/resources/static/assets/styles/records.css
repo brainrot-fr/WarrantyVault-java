@@ -87,6 +87,14 @@
 .settings-form > h2 {
   font-size: 1.8rem;
 }
+.settings-subheading {
+  margin-top: 0.75rem;
+  font-size: 1.35rem;
+}
+.role-explanation {
+  flex-basis: 100%;
+  margin: 0.2rem 0 0;
+}
 .coverage-progress {
   display: grid;
   gap: 0.55rem;

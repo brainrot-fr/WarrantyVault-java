@@ -4,7 +4,8 @@ import {
   link,
   errorBox,
   formatMoney,
-  describeExpiry
+  describeExpiry,
+  statusBadge
 } from '../ui.js';
 
 function renderProductSummary(product) {
@@ -12,13 +13,7 @@ function renderProductSummary(product) {
   const label = String(product.status || '').toLowerCase().replaceAll('_', '-');
   const summary = element('span', {className: 'product-summary'});
   summary.append(element('strong', {}, title), element('small', {}, product.spaceName));
-  const status = element('span', {
-    className: `status-label status-${label}`
-  });
-  if (product.status === 'EXPIRING_SOON' || product.status === 'EXPIRED') {
-    status.append(element('span', {'aria-hidden': 'true'}, product.status === 'EXPIRED' ? 'x ' : '! '));
-  }
-  status.append(product.status?.replaceAll('_', ' ') || 'Warranty');
+  const status = statusBadge(product.status?.replaceAll('_', ' ') || 'Warranty', label);
   const expiry = element('span', {className: 'product-summary-expiry'});
   expiry.append(
       element('small', {}, describeExpiry(product.daysRemaining, product.expiresOn)),
@@ -39,6 +34,7 @@ export async function renderDashboard(runtime) {
       element('p', {className: 'eyebrow'}, `Welcome${runtime.session?.name ? `, ${runtime.session.name}` : ''}`),
       element('h1', {}, 'Overview'),
       element('p', {className: 'section-intro'}, 'A clear view of your recorded warranty coverage.'));
+  heading.append(link('Add product', '/add-product', 'button button-primary'));
   main.append(heading);
   const content = element('div', {className: 'dashboard-layout'});
   const primary = element('section', {className: 'dashboard-main'});
@@ -95,13 +91,16 @@ export async function renderDashboard(runtime) {
       primary.append(element(
           'p', {className: 'empty-note'}, 'No warranty records yet. Open a Space and choose Add product.'));
     } else {
-      appendProductList(primary, 'Expiring soon', expiring);
+      const attention = element('section', {className: 'needs-attention'});
+      attention.append(element('h2', {className: 'section-title'}, 'Needs attention'));
+      appendProductList(attention, 'Expiring soon', expiring);
       if (expired.length) {
-        primary.append(element('h2', {className: 'section-title'}, 'Expired (recent)'));
-        const list = element('div', {className: 'line-list'});
-        expired.forEach((product) => list.append(renderProductSummary(product)));
-        primary.append(list);
-      }
+          attention.append(element('h2', {className: 'section-title'}, 'Recently expired'));
+          const list = element('div', {className: 'line-list'});
+          expired.forEach((product) => list.append(renderProductSummary(product)));
+          attention.append(list);
+        }
+      if (expiring.length || expired.length) primary.append(attention);
       appendProductList(primary, 'Active', active);
       const upcomingCount = (counts.active || 0) + soonCount;
       if (upcoming.length >= 50 && upcomingCount > upcoming.length) {
