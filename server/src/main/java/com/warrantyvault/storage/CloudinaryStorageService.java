@@ -15,6 +15,7 @@ import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import jakarta.annotation.PostConstruct;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,7 @@ public class CloudinaryStorageService implements StorageService {
     private CloudinaryClient client;
     private UrlFetcher urlFetcher = new HttpUrlFetcher();
 
+    @Autowired
     public CloudinaryStorageService(@Value("${CLOUDINARY_URL:}") String cloudinaryUrl) {
         this.cloudinaryUrl = cloudinaryUrl;
     }
