@@ -65,7 +65,7 @@ public class CloudinaryStorageService implements StorageService {
         }
         String publicId = "warrantyvault/" + spaceId + "/" + UUID.randomUUID();
         try {
-            client.upload(bytes, ObjectUtils.asMap(
+            client.upload(bytes, Map.of(
                 "public_id", publicId,
                 "resource_type", "image",
                 "type", "authenticated",
