@@ -31,12 +31,15 @@ export function renderAuth(registration, runtime) {
   const form = element('form', {className: 'form-column', novalidate: ''});
   form.append(
       element('h2', {}, registration ? 'Create your vault' : 'Sign in'));
-  const errorRegion = element('div', {'aria-live': 'polite'});
+  const errorRegion = element('div', {
+    id: 'auth-errors', 'aria-live': 'assertive', 'aria-atomic': 'true'
+  });
   if (registration) {
     addField(
         form, 'Your name', 'name', 'text',
         {
           autocomplete: 'name',
+          autofocus: '',
           minlength: '2',
           maxlength: '120',
           placeholder: 'Your name'
@@ -44,6 +47,7 @@ export function renderAuth(registration, runtime) {
   }
   addField(form, 'Email address', 'email', 'email', {
     autocomplete: 'email',
+    autofocus: registration ? undefined : '',
     placeholder: 'you@example.com'
   });
   const passwordInput = addField(form, 'Password', 'password', 'password', {
@@ -116,12 +120,32 @@ export function renderAuth(registration, runtime) {
       const next = new URLSearchParams(window.location.search).get('next');
       runtime.navigate(safeNext(next), true);
     } catch (error) {
-      showMessage(errorRegion, error.message);
-      showFieldErrors(form, error.fieldErrors, {
+      const firstInvalid = showFieldErrors(form, error.fieldErrors, {
         name: 'Name',
         email: 'Email address',
         password: 'Password'
       });
+      errorRegion.replaceChildren(element(
+          'p', {className: 'form-error-summary-title'}, 'We could not sign you in.'));
+      const summary = element('ul', {className: 'field-error-list'});
+      if (error.fieldErrors && typeof error.fieldErrors === 'object') {
+        for (const [field, messages] of Object.entries(error.fieldErrors)) {
+          const input = form.elements.namedItem(field);
+          const text = (Array.isArray(messages) ? messages : [messages])
+              .map((message) => typeof message === 'string' ? message : message?.message)
+              .filter(Boolean).join(' ');
+          if (input && text) {
+            const item = element('li');
+            const anchor = element('a', {href: `#${input.id}`}, text);
+            item.append(anchor);
+            summary.append(item);
+          }
+        }
+      }
+      if (!summary.childElementCount)
+        summary.append(element('li', {}, error.message));
+      errorRegion.append(summary);
+      (firstInvalid || form.querySelector('input')).focus();
     } finally {
       submit.disabled = false;
       submit.textContent = registration ? 'Create account' : 'Sign in';

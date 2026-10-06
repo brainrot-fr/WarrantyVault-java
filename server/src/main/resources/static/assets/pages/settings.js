@@ -5,6 +5,7 @@ import {
   addSelect,
   addPasswordToggle,
   showMessage,
+  showToast,
   showFieldErrors,
   errorBox
 } from '../ui.js';
@@ -27,6 +28,9 @@ export async function renderSettings(runtime) {
     const profile = element('form', {className: 'settings-form'});
     profile.append(element('h2', {}, 'Profile'));
     profile.append(element(
+        'p', {className: 'section-intro'},
+        'Keep your name and account details up to date.'));
+    profile.append(element(
         'p', {className: 'settings-row'},
         [element('span', {}, 'Email'), element('strong', {}, user.email)]));
     const name = addField(
@@ -38,6 +42,7 @@ export async function renderSettings(runtime) {
           placeholder: 'Your name'
         });
     name.value = user.name;
+    profile.append(element('h2', {className: 'settings-subheading'}, 'Preferences'));
     const timezoneOptions = [...new Set([
       user.timezone || 'UTC', 'UTC',
       ...(typeof Intl.supportedValuesOf === 'function' ?
@@ -47,9 +52,21 @@ export async function renderSettings(runtime) {
             'Australia/Sydney'
           ])
     ])].sort();
+    const timezoneSearch = addField(
+        profile, 'Search time zones', 'timezoneSearch', 'search',
+        {required: false, placeholder: 'Type a city or region'});
     const timezone = addSelect(
         profile, 'Timezone', 'timezone',
         timezoneOptions.map((zone) => [zone, zone]), user.timezone || 'UTC');
+    timezoneSearch.addEventListener('input', () => {
+      const query = timezoneSearch.value.trim().toLowerCase();
+      for (const option of timezone.options)
+        option.hidden = Boolean(query) &&
+            !option.value.toLowerCase().includes(query);
+      const selected = [...timezone.options].find((option) => !option.hidden);
+      if (selected && timezone.options[timezone.selectedIndex]?.hidden)
+        timezone.value = selected.value;
+    });
     const currencies = [...new Set([
       user.currency || 'INR',
       ...(typeof Intl.supportedValuesOf === 'function' ?
@@ -82,7 +99,7 @@ export async function renderSettings(runtime) {
           })
         });
         runtime.setSession(updated);
-        showMessage(profileFeedback, 'Account details saved.', 'status');
+        showToast('Account details saved.');
       } catch (error) {
         showMessage(profileFeedback, error.message);
         showFieldErrors(profile, error.fieldErrors, {name: 'Name', timezone: 'Time zone', currency: 'Currency'});
@@ -93,7 +110,11 @@ export async function renderSettings(runtime) {
     main.append(profile);
 
     const password = element('form', {className: 'settings-form inline-form'});
-    password.append(element('h2', {}, 'Change password'));
+    password.append(element('h2', {}, 'Security'));
+    password.append(element(
+        'p', {className: 'section-intro'},
+        'Change your password regularly. Passwords must be 8–72 UTF-8 bytes and '
+        + 'should be unique; avoid common passwords.'));
     addPasswordToggle(addField(
         password, 'Current password', 'currentPassword', 'password',
         {
@@ -151,7 +172,7 @@ export async function renderSettings(runtime) {
           })
         });
         password.reset();
-        showMessage(passwordFeedback, 'Password updated.', 'status');
+        showToast('Password updated.');
       } catch (error) {
         showMessage(passwordFeedback, error.message);
         showFieldErrors(password, error.fieldErrors, {

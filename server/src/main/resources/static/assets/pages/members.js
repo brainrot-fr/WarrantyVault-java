@@ -5,6 +5,7 @@ import {
   addField,
   addSelect,
   showMessage,
+  showToast,
   formatDateTime,
   errorBox,
   confirmDialog
@@ -45,6 +46,11 @@ export async function renderMembers(runtime, spaceId) {
         const role = addSelect(
             controls, 'Role', `role-${member.userId}`,
             [['EDITOR', 'Editor'], ['VIEWER', 'Viewer']], member.role);
+        role.closest('.field').append(element(
+            'small', {className: 'muted'},
+            member.role === 'EDITOR' ?
+                'Can add, edit, and manage product records.' :
+                'Can view products and documents.'));
         role.closest('.field').querySelector('label').append(
             element('span', {className: 'sr-only'}, ` for ${member.name}`));
         role.addEventListener('change', async () => {
@@ -56,7 +62,7 @@ export async function renderMembers(runtime, spaceId) {
                     encodeURIComponent(member.userId)}`,
                 {method: 'PATCH', body: JSON.stringify({role: role.value})});
             member.role = role.value;
-            showMessage(feedback, `${member.name}'s role was updated.`, 'status');
+            showToast(`${member.name}'s role was updated.`);
           } catch (error) {
             showMessage(feedback, error.message);
             role.value = previousRole;
@@ -131,7 +137,8 @@ export async function renderMembers(runtime, spaceId) {
           [['VIEWER', 'Viewer'], ['EDITOR', 'Editor']], 'VIEWER');
       inviteForm.append(element(
           'p', {className: 'muted'},
-          'Invitations are accepted from the invitee’s Invitations page.'));
+          'Viewers can read products and documents. Editors can add and edit them. '
+          + 'The invitee enters the one-time code from their Invitations page.'));
       const inviteFeedback = element('div', {'aria-live': 'polite'});
       inviteForm.append(
           inviteFeedback,
@@ -166,7 +173,7 @@ export async function renderMembers(runtime, spaceId) {
           copy.addEventListener('click', async () => {
             try {
               await navigator.clipboard.writeText(created.inviteCode);
-              showMessage(copyFeedback, 'Code copied.', 'status');
+              showToast('Invitation code copied.');
             } catch {
               codeInput.select();
               document.execCommand('copy');
@@ -177,6 +184,7 @@ export async function renderMembers(runtime, spaceId) {
           dismiss.addEventListener('click', () => inviteNotice.remove());
           inviteNotice.append(codeInput, copy, copyFeedback, dismiss);
           inviteForm.reset();
+          showToast('Invitation created. Share the code now; it is shown only once.');
         } catch (error) {
           showMessage(inviteFeedback, error.message);
           submit.disabled = false;

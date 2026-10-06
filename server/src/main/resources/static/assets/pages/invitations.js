@@ -2,6 +2,7 @@ import {apiJson} from '../api.js';
 import {
   element,
   showMessage,
+  showToast,
   formatDateTime,
   errorBox
 } from '../ui.js';
@@ -30,6 +31,10 @@ export async function renderInvitations(runtime) {
                 invitation.role.toLowerCase()} · expires ${
                 formatDateTime(invitation.expiresAt)}`)
       ]));
+      row.append(element('p', {className: 'muted role-explanation'},
+          invitation.role === 'EDITOR' ?
+              'Editors can add and edit products and documents.' :
+              'Viewers can read products and documents.'));
       const actions = element('span', {className: 'member-actions'});
       const codeField = element('div', {className: 'field'});
       const codeInput = element('input', {
@@ -39,8 +44,7 @@ export async function renderInvitations(runtime) {
         required: '',
         placeholder: 'Enter the invite code'
       });
-      const codeLabel =
-          element('label', {for: codeInput.id}, 'Invite code (required)');
+      const codeLabel = element('label', {for: codeInput.id}, 'Invite code');
       const codeError = element('p', {
         className: 'field-error', id: `${codeInput.id}-error`, hidden: true
       });
@@ -65,13 +69,17 @@ export async function renderInvitations(runtime) {
                 {
                   method: 'POST',
                   body: action === 'accept' ?
-                      JSON.stringify({code: codeInput.value.trim()}) : '{}'
+                      JSON.stringify({
+                        code: codeInput.value.trim().toUpperCase().replace(/[\s-]+/g, '')
+                      }) : '{}'
                 });
             await runtime.refreshInvitations(true);
             if (action === 'accept')
               runtime.navigate(`/spaces/${encodeURIComponent(accepted.id)}`);
-            else
+            else {
+              showToast('Invitation declined.');
               await renderInvitations(runtime);
+            }
           } catch (error) {
             if (action === 'accept' && error.code === 'INVALID_INVITE_CODE') {
               codeError.textContent = error.message;
