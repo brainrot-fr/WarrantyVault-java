@@ -99,6 +99,7 @@ export function renderProductForm(runtime, spaceId, productId) {
 
 function buildProductForm(runtime, spaceId, product, facets) {
   const form = element('form', {className: 'product-form'});
+  const draftKey = `warrantyvault:product-draft:${spaceId || 'new'}`;
   const feedback = element('div', {'aria-live': 'polite'});
   const details = element('fieldset', {className: 'form-section'});
   details.append(element('legend', {}, 'Product details'));
@@ -243,6 +244,19 @@ function buildProductForm(runtime, spaceId, product, facets) {
   form.elements.currency.value =
       product?.currency || runtime.session?.currency || 'INR';
   form.elements.notes.value = product?.notes || '';
+  if (!product) {
+    try {
+      const draft = JSON.parse(localStorage.getItem(draftKey) || 'null');
+      for (const name of ['productType', 'brand', 'modelName', 'serialNumber',
+                          'purchasedOn', 'warrantyMonths', 'purchasePrice',
+                          'currency', 'notes']) {
+        if (draft?.[name] != null && form.elements[name])
+          form.elements[name].value = draft[name];
+      }
+    } catch {
+      localStorage.removeItem(draftKey);
+    }
+  }
   if (!purchased.value) purchased.value = todayInTimezone(runtime.session?.timezone || 'UTC');
   const coverageHint = element('p', {className: 'muted', 'aria-live': 'polite'});
   months.closest('.field').append(coverageHint);
@@ -339,10 +353,14 @@ function buildProductForm(runtime, spaceId, product, facets) {
                     `/api/spaces/${encodeURIComponent(spaceId)}/products`,
           {method: product ? 'PUT' : 'POST', body: payload, timeoutMs: 120000});
       runtime.setUnsavedChanges(false);
+      if (!product) localStorage.removeItem(draftKey);
       if (!product && form.dataset.addAnother === 'true') {
+        const savedType = payloadData.productType;
+        const savedCurrency = payloadData.currency;
         form.reset();
         purchased.value = todayInTimezone(runtime.session?.timezone || 'UTC');
-        form.elements.currency.value = payloadData.currency;
+        productType.value = savedType;
+        form.elements.currency.value = savedCurrency;
         form.dataset.addAnother = '';
         updateCoverage();
         window.scrollTo(0, 0);
@@ -386,6 +404,15 @@ function buildProductForm(runtime, spaceId, product, facets) {
   });
   form.addEventListener('input', () => runtime.setUnsavedChanges(true));
   form.addEventListener('change', () => runtime.setUnsavedChanges(true));
+  form.addEventListener('input', () => {
+    if (product) return;
+    const draft = {};
+    for (const name of ['productType', 'brand', 'modelName', 'serialNumber',
+                        'purchasedOn', 'warrantyMonths', 'purchasePrice',
+                        'currency', 'notes'])
+      draft[name] = form.elements[name]?.value || '';
+    localStorage.setItem(draftKey, JSON.stringify(draft));
+  });
   return form;
 }
 
