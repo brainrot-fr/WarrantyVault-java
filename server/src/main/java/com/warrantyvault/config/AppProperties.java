@@ -27,6 +27,7 @@ public class AppProperties {
 
     @Data
     public static class Storage {
+        private String provider = "local";
         private String localDir = "./uploads";
         @Min(0) private long maxBytesPerSpace = 2_147_483_648L;
     }
