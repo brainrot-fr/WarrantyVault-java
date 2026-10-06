@@ -1,4 +1,29 @@
 @media (max-width: 760px) {
+  .mobile-tab-bar {
+    position: fixed;
+    z-index: 5;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.1rem;
+    padding: 0.45rem 0.35rem calc(0.45rem + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--hairline);
+    background: var(--raised);
+  }
+  .mobile-tab-bar a {
+    min-height: 44px;
+    display: grid;
+    place-items: center;
+    color: var(--ink-muted);
+    font-size: 0.72rem;
+    text-decoration: none;
+  }
+  .mobile-tab-bar a[aria-current="page"] {
+    color: var(--ink);
+    font-weight: 700;
+  }
   .site-header {
     min-height: 0;
     flex-wrap: wrap;
@@ -31,8 +56,9 @@
   .page-content {
     width: min(100% - 2.5rem, var(--content-width));
     padding-top: 2.5rem;
-    padding-bottom: 3.5rem;
+    padding-bottom: 6.5rem;
   }
+
   .landing,
   .auth-layout,
   .dashboard-layout {
@@ -87,6 +113,10 @@
   .site-footer {
     padding-inline: 1.25rem;
   }
+}
+
+.mobile-tab-bar {
+  display: none;
 }
 
 @media (max-width: 420px) {

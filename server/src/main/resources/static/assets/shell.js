@@ -1,4 +1,4 @@
-import {element, link} from './ui.js';
+import {element, link, getTheme, setTheme} from './ui.js';
 
 function navigationLink(label, href) {
   const anchor = link(label, href);
@@ -19,6 +19,7 @@ function renderHeader(authenticated, onLogout, invitationCount) {
     nav.append(
         navigationLink('Overview', '/dashboard'),
         navigationLink('Spaces', '/spaces'),
+        link('Add product', '/add-product', 'button button-primary'),
         navigationLink(
             invitationCount == null ? 'Invitations' :
                                       `Invitations (${invitationCount})`,
@@ -27,7 +28,15 @@ function renderHeader(authenticated, onLogout, invitationCount) {
     const signOut = element(
         'button', {className: 'text-button', type: 'button'}, 'Sign out');
     signOut.addEventListener('click', onLogout);
-    header.append(nav, signOut);
+    const themeToggle = element(
+        'button', {className: 'text-button', type: 'button'},
+        getTheme() === 'dark' ? 'Use light theme' : 'Use dark theme');
+    themeToggle.addEventListener('click', () => {
+      const next = getTheme() === 'dark' ? 'light' : 'dark';
+      setTheme(next);
+      themeToggle.textContent = next === 'dark' ? 'Use light theme' : 'Use dark theme';
+    });
+    header.append(nav, themeToggle, signOut);
   } else {
     const nav = element(
         'nav', {'aria-label': 'Account navigation', className: 'primary-nav'});
@@ -48,6 +57,17 @@ export function renderShell(
     } = {}) {
   const page = element('div', {className: 'app-page'});
   page.append(renderHeader(authenticated, onLogout, invitationCount));
+  if (authenticated) {
+    const mobileNav = element(
+        'nav', {'aria-label': 'Mobile navigation', className: 'mobile-tab-bar'});
+    mobileNav.append(
+        navigationLink('Overview', '/dashboard'),
+        navigationLink('Spaces', '/spaces'),
+        navigationLink('Add', '/add-product'),
+        navigationLink('Invitations', '/invitations'),
+        navigationLink('Settings', '/settings'));
+    page.append(mobileNav);
+  }
   if (bootstrapError)
     page.append(element(
         'p', {className: 'connection-banner', role: 'status'}, bootstrapError));

@@ -13,11 +13,26 @@ import {renderShell} from './shell.js';
 import {element, link, confirmDialog} from './ui.js';
 
 const root = document.querySelector('#app');
+function renderConnectionState(offline) {
+  const existing = document.querySelector('.connection-banner');
+  if (!offline) {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const page = document.querySelector('.app-page');
+  const main = document.querySelector('#main-content');
+  if (page && main) page.insertBefore(
+      element('p', {className: 'connection-banner', role: 'status'},
+          'You are offline. Changes will resume when the connection returns.'),
+      main);
+}
 const activeImageUrls = new Set();
 const routes = [
   {pattern: /^\/$/, page: 'landing'}, {pattern: /^\/login\/?$/, page: 'login'},
   {pattern: /^\/register\/?$/, page: 'register'},
   {pattern: /^\/dashboard\/?$/, page: 'dashboard', protected: true},
+  {pattern: /^\/add-product\/?$/, page: 'product-new-global', protected: true},
   {pattern: /^\/spaces\/?$/, page: 'spaces', protected: true},
   {pattern: /^\/spaces\/([^/]+)\/?$/, page: 'space', protected: true}, {
     pattern: /^\/spaces\/([^/]+)\/products\/new\/?$/,
@@ -247,6 +262,8 @@ async function render() {
       return renderProduct(runtime, route.params[0], route.params[1]);
     case 'product-new':
       return renderProductForm(runtime, route.params[0], null);
+    case 'product-new-global':
+      return renderProductForm(runtime, null, null);
     case 'product-edit':
       return renderProductForm(runtime, route.params[0], route.params[1]);
     case 'members':
@@ -322,6 +339,8 @@ window.addEventListener('warrantyvault:session-expired', () => {
   navigate(`/login?next=${encodeURIComponent(next)}`, true);
 });
 window.addEventListener('pagehide', releaseImageUrls);
+window.addEventListener('offline', () => renderConnectionState(true));
+window.addEventListener('online', () => renderConnectionState(false));
 
 restoreSession()
     .then((restored) => {

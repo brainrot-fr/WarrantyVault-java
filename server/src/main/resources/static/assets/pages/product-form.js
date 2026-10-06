@@ -17,14 +17,56 @@ export function renderProductForm(runtime, spaceId, productId) {
       'p', {role: 'status'},
       productId ? 'Loading product…' : 'Loading Space…'));
   runtime.renderShell(main, true);
+  const spaceRequest = spaceId ?
+      apiJson(`/api/spaces/${encodeURIComponent(spaceId)}`) :
+      apiJson('/api/spaces');
   Promise
       .all([
-        apiJson(`/api/spaces/${encodeURIComponent(spaceId)}`),
+        spaceRequest,
         productId ? apiJson(`/api/products/${encodeURIComponent(productId)}`) :
                     Promise.resolve(null),
         apiJson('/api/products/facets')
       ])
       .then(([space, product, facets]) => {
+        if (!spaceId) {
+          const available = (space || []).filter(
+              (candidate) => candidate.permissions?.canCreateProducts);
+          if (!available.length) {
+            main.removeAttribute('aria-busy');
+            main.replaceChildren(
+                element('div', {className: 'empty-state'}, [
+                  element('h1', {}, 'Create a Space first'),
+                  element('p', {}, 'You need a Space before you can save a product.'),
+                  link('Create a Space', '/spaces', 'button button-primary')
+                ]));
+            return;
+          }
+          if (available.length === 1) {
+            return renderProductForm(runtime, available[0].id, productId);
+          }
+          main.removeAttribute('aria-busy');
+          main.replaceChildren(
+              element('div', {className: 'page-heading'}, [
+                element('p', {className: 'eyebrow'}, 'New record'),
+                element('h1', {}, 'Add product'),
+                element('p', {className: 'section-intro'}, 'Choose where to keep this product.')
+              ]));
+          const picker = element('form', {className: 'form-column'});
+          const select = addSelect(
+              picker, 'Space', 'spaceId',
+              available.map((candidate) => [candidate.id, candidate.name]),
+              localStorage.getItem('warrantyvault:last-space') || available[0].id);
+          picker.append(element(
+              'button', {type: 'submit', className: 'button button-primary'},
+              'Continue'));
+          picker.addEventListener('submit', (event) => {
+            event.preventDefault();
+            localStorage.setItem('warrantyvault:last-space', select.value);
+            renderProductForm(runtime, select.value, null);
+          });
+          main.append(picker);
+          return;
+        }
         if (!product && !space.permissions?.canCreateProducts)
           throw new Error(
               'You do not have permission to add products to this Space.');
@@ -45,6 +87,7 @@ export function renderProductForm(runtime, spaceId, productId) {
                 'text-button'));
         main.append(heading);
         main.append(buildProductForm(runtime, spaceId, product, facets));
+        localStorage.setItem('warrantyvault:last-space', spaceId);
       })
       .catch(
           (error) => {
@@ -107,6 +150,17 @@ function buildProductForm(runtime, spaceId, product, facets) {
         placeholder: 'e.g. 24',
         hint: 'From 1 to 120 months.'
       });
+  const monthChips = element('div', {className: 'chip-group', 'aria-label': 'Common warranty periods'});
+  for (const value of [6, 12, 24, 36, 60]) {
+    const chip = element('button', {type: 'button', className: 'chip'}, `${value} months`);
+    chip.addEventListener('click', () => {
+      months.value = value;
+      months.dispatchEvent(new Event('input', {bubbles: true}));
+      updateCoverage();
+    });
+    monthChips.append(chip);
+  }
+  months.closest('.field').append(monthChips);
   const price = addField(
       coverage, 'Purchase price', 'purchasePrice', 'number',
       {
@@ -163,6 +217,7 @@ function buildProductForm(runtime, spaceId, product, facets) {
       card.disabled = removeCard.checked;
     });
   }
+  form.insertBefore(documents, form.firstChild);
   card.addEventListener('change', () => {
     if (card.files.length && removeCard) removeCard.checked = false;
     if (removeCard) {
@@ -188,14 +243,43 @@ function buildProductForm(runtime, spaceId, product, facets) {
   form.elements.currency.value =
       product?.currency || runtime.session?.currency || 'INR';
   form.elements.notes.value = product?.notes || '';
+  if (!purchased.value) purchased.value = todayInTimezone(runtime.session?.timezone || 'UTC');
+  const coverageHint = element('p', {className: 'muted', 'aria-live': 'polite'});
+  months.closest('.field').append(coverageHint);
+  function updateCoverage() {
+    if (!purchased.value || !months.value) {
+      coverageHint.textContent = '';
+      return;
+    }
+    const date = new Date(`${purchased.value}T00:00:00`);
+    date.setMonth(date.getMonth() + Number(months.value));
+    coverageHint.textContent = `Covered until ${new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium'
+    }).format(date)}`;
+  }
+  purchased.addEventListener('input', updateCoverage);
+  months.addEventListener('input', updateCoverage);
+  updateCoverage();
   form.append(element(
       'p', {className: 'document-privacy-hint'},
       'Uploaded documents are private to this Space and available only to its members.'));
-  form.append(
+  const saveActions = element('div', {className: 'form-actions'});
+  saveActions.append(
       feedback,
       element(
           'button', {className: 'button button-primary', type: 'submit'},
           product ? 'Save product' : 'Add product'));
+  if (!product) {
+    const another = element(
+        'button', {className: 'button button-secondary', type: 'button'},
+        'Save and add another');
+    another.addEventListener('click', () => {
+      form.dataset.addAnother = 'true';
+      form.requestSubmit();
+    });
+    saveActions.append(another);
+  }
+  form.append(saveActions);
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (!form.reportValidity()) return;
@@ -255,6 +339,18 @@ function buildProductForm(runtime, spaceId, product, facets) {
                     `/api/spaces/${encodeURIComponent(spaceId)}/products`,
           {method: product ? 'PUT' : 'POST', body: payload, timeoutMs: 120000});
       runtime.setUnsavedChanges(false);
+      if (!product && form.dataset.addAnother === 'true') {
+        form.reset();
+        purchased.value = todayInTimezone(runtime.session?.timezone || 'UTC');
+        form.elements.currency.value = payloadData.currency;
+        form.dataset.addAnother = '';
+        updateCoverage();
+        window.scrollTo(0, 0);
+        showMessage(feedback, 'Product saved. Add another product.', 'status');
+        submit.disabled = false;
+        submit.textContent = 'Add product';
+        return;
+      }
       runtime.navigate(
           `/spaces/${encodeURIComponent(spaceId)}/products/${
               encodeURIComponent(saved.id)}`,
