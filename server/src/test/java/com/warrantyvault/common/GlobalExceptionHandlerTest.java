@@ -40,7 +40,8 @@ class GlobalExceptionHandlerTest {
         var response = handler.handleUnexpected(new IllegalStateException("sensitive internal detail"));
 
         assertProblem(response, HttpStatus.INTERNAL_SERVER_ERROR, "INTERNAL_ERROR");
-        assertEquals("The request could not be completed", response.getBody().get("detail"));
+        assertTrue(response.getBody().get("detail").toString().startsWith("The request could not be completed. Reference: "));
+        assertTrue(!response.getBody().get("detail").toString().contains("sensitive internal detail"));
     }
 
     private void assertProblem(org.springframework.http.ResponseEntity<Map<String, Object>> response,

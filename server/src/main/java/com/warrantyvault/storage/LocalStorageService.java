@@ -1,37 +1,64 @@
 package com.warrantyvault.storage;
 
+import com.warrantyvault.common.ApiException;
 import com.warrantyvault.config.AppProperties;
+import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.Set;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
-import com.warrantyvault.common.ApiException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
-import org.springframework.web.multipart.MultipartFile;
 
 @Service
 @RequiredArgsConstructor
 public class LocalStorageService implements StorageService {
+    private static final Logger logger = LoggerFactory.getLogger(LocalStorageService.class);
+    private static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS = Set.of(
+        PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE, PosixFilePermission.OWNER_EXECUTE);
+    private static final Set<PosixFilePermission> FILE_PERMISSIONS = Set.of(
+        PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE);
+
     private final AppProperties appProperties;
+    private Path baseDirectory;
+
+    @PostConstruct
+    void initializeBaseDirectory() {
+        baseDirectory = Paths.get(appProperties.getStorage().getLocalDir()).toAbsolutePath().normalize();
+        logger.info("Local upload directory: {}", baseDirectory);
+    }
 
     @Override
-    public StoredFile store(MultipartFile file, String spaceId) {
+    public StoredFile store(byte[] bytes, String spaceId) {
+        Path target = null;
         try {
-            Path base = Paths.get(appProperties.getStorage().getLocalDir()).toAbsolutePath().normalize();
-            Path dir = base.resolve(spaceId).normalize();
-            if (!dir.startsWith(base)) throw new ApiException("INVALID_PATH", "Invalid storage path", 400);
-            Files.createDirectories(dir);
-            byte[] bytes = file.getBytes();
-            ImageFormat format = imageFormat(bytes);
-            if (format == null) throw new ApiException("UNSUPPORTED_MEDIA", "Only JPEG, PNG, and WebP images are accepted", 415);
+            Path directory = baseDirectory.resolve(spaceId).normalize();
+            if (!directory.startsWith(baseDirectory)) throw invalidPath();
+            Files.createDirectories(directory);
+            setPermissions(directory, DIRECTORY_PERMISSIONS);
+            ImageSniffer.Format format = ImageSniffer.sniff(bytes)
+                .orElseThrow(() -> new ApiException("UNSUPPORTED_MEDIA",
+                    "Only JPEG, PNG, and WebP images are accepted", 415));
             String fileName = UUID.randomUUID() + "." + format.extension();
-            Path target = dir.resolve(fileName);
-            Files.write(target, bytes);
+            target = directory.resolve(fileName);
+            Files.write(target, bytes, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE);
+            setPermissions(target, FILE_PERMISSIONS);
             return new StoredFile(spaceId + "/" + fileName, format.contentType(), bytes.length);
-        } catch (IOException e) {
+        } catch (IOException exception) {
+            if (target != null) {
+                try {
+                    Files.deleteIfExists(target);
+                } catch (IOException cleanupFailure) {
+                    logger.warn("Could not remove an incomplete upload file");
+                }
+            }
             throw new ApiException("STORAGE_FAILED", "The image could not be stored", 500);
         }
     }
@@ -39,11 +66,9 @@ public class LocalStorageService implements StorageService {
     @Override
     public InputStream open(String key) {
         try {
-            Path base = Paths.get(appProperties.getStorage().getLocalDir()).toAbsolutePath().normalize();
-            Path file = base.resolve(key).normalize();
-            if (!file.startsWith(base)) throw new ApiException("INVALID_PATH", "Invalid storage path", 400);
+            Path file = resolveKey(key);
             return Files.newInputStream(file);
-        } catch (IOException e) {
+        } catch (IOException exception) {
             throw new ApiException("FILE_NOT_FOUND", "Stored image could not be opened", 404);
         }
     }
@@ -51,23 +76,27 @@ public class LocalStorageService implements StorageService {
     @Override
     public void delete(String key) {
         try {
-            Path base = Paths.get(appProperties.getStorage().getLocalDir()).toAbsolutePath().normalize();
-            Path file = base.resolve(key).normalize();
-            if (!file.startsWith(base)) throw new ApiException("INVALID_PATH", "Invalid storage path", 400);
-            Files.deleteIfExists(file);
-        } catch (IOException e) {
+            Files.deleteIfExists(resolveKey(key));
+        } catch (IOException exception) {
             throw new ApiException("STORAGE_DELETE_FAILED", "Stored image could not be deleted", 500);
         }
     }
 
-    private ImageFormat imageFormat(byte[] bytes) {
-        if (bytes.length >= 3 && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xd8 && (bytes[2] & 0xff) == 0xff) return new ImageFormat("jpg", "image/jpeg");
-        if (bytes.length >= 8 && (bytes[0] & 0xff) == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G'
-            && bytes[4] == 0x0d && bytes[5] == 0x0a && bytes[6] == 0x1a && bytes[7] == 0x0a) return new ImageFormat("png", "image/png");
-        if (bytes.length >= 12 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F'
-            && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P') return new ImageFormat("webp", "image/webp");
-        return null;
+    private Path resolveKey(String key) {
+        Path file = baseDirectory.resolve(key).normalize();
+        if (!file.startsWith(baseDirectory)) throw invalidPath();
+        return file;
     }
 
-    private record ImageFormat(String extension, String contentType) {}
+    private ApiException invalidPath() {
+        return new ApiException("INVALID_PATH", "Invalid storage path", 400);
+    }
+
+    private void setPermissions(Path path, Set<PosixFilePermission> permissions) throws IOException {
+        try {
+            Files.setPosixFilePermissions(path, permissions);
+        } catch (UnsupportedOperationException ignored) {
+            // The filesystem does not expose POSIX permissions.
+        }
+    }
 }

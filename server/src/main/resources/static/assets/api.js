@@ -72,7 +72,7 @@ export async function restoreSession() {
 }
 
 export async function apiRequest(path, options = {}) {
-  const {skipRefresh = false, ...requestOptions} = options;
+  const {skipRefresh = false, timeoutMs = requestTimeoutMs, ...requestOptions} = options;
   const headers = new Headers(requestOptions.headers || {});
   const isForm = requestOptions.body instanceof FormData;
   if (requestOptions.body != null && !isForm && !headers.has('Content-Type')) {
@@ -86,7 +86,7 @@ export async function apiRequest(path, options = {}) {
       ...requestOptions,
       headers,
       credentials: 'include',
-      signal: requestOptions.signal || AbortSignal.timeout(requestTimeoutMs)
+      signal: requestOptions.signal || AbortSignal.timeout(timeoutMs)
     });
   } catch (error) {
     if (requestOptions.signal?.aborted) throw error;

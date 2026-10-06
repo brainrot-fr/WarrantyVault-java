@@ -6,11 +6,12 @@ import {
   addSelect,
   showMessage,
   formatDateTime,
-  errorBox
+  errorBox,
+  confirmDialog
 } from '../ui.js';
 
 export async function renderMembers(runtime, spaceId) {
-  const main = element('main', {className: 'page-content'});
+  const main = element('main', {className: 'page-content', 'aria-busy': 'true'});
   main.append(element('p', {role: 'status'}, 'Loading members…'));
   runtime.renderShell(main, true);
   try {
@@ -18,6 +19,8 @@ export async function renderMembers(runtime, spaceId) {
       apiJson(`/api/spaces/${encodeURIComponent(spaceId)}`),
       apiJson(`/api/spaces/${encodeURIComponent(spaceId)}/members`)
     ]);
+    runtime.setPageTitle('Members');
+    main.removeAttribute('aria-busy');
     main.replaceChildren();
     const heading = element('div', {className: 'page-heading'});
     heading.append(
@@ -34,34 +37,43 @@ export async function renderMembers(runtime, spaceId) {
     for (const member of listing.members || []) {
       const row = element('article', {className: 'line-item member-row'});
       const details = element('span');
-      details.append(
-          element('strong', {}, member.name),
-          element('small', {}, member.email));
+      details.append(element('strong', {}, member.name));
+      if (member.email) details.append(element('small', {}, member.email));
       row.append(details);
       if (space.permissions?.canManageMembers && member.role !== 'OWNER') {
         const controls = element('div', {className: 'member-actions'});
         const role = addSelect(
-            controls, `Role for ${member.name}`, `role-${member.userId}`,
+            controls, 'Role', `role-${member.userId}`,
             [['EDITOR', 'Editor'], ['VIEWER', 'Viewer']], member.role);
+        role.closest('.field').querySelector('label').append(
+            element('span', {className: 'sr-only'}, ` for ${member.name}`));
         role.addEventListener('change', async () => {
+          const previousRole = member.role;
+          role.disabled = true;
           try {
             await apiJson(
                 `/api/spaces/${encodeURIComponent(spaceId)}/members/${
                     encodeURIComponent(member.userId)}`,
                 {method: 'PATCH', body: JSON.stringify({role: role.value})});
+            member.role = role.value;
+            showMessage(feedback, `${member.name}'s role was updated.`, 'status');
           } catch (error) {
             showMessage(feedback, error.message);
-            role.value = member.role;
+            role.value = previousRole;
+          } finally {
+            role.disabled = false;
           }
         });
         const remove = element(
             'button', {type: 'button', className: 'text-button remove-link'},
             'Remove');
         remove.addEventListener('click', async () => {
-          if (!window.confirm(`Remove ${member.name} from ${
-                  space
-                      .name}? They will lose access to its products and documents.`))
-            return;
+          if (!await confirmDialog({
+            title: `Remove ${member.name}?`,
+            body: `They will lose access to ${space.name} and its documents.`,
+            confirmLabel: 'Remove',
+            danger: true
+          })) return;
           try {
             await apiJson(
                 `/api/spaces/${encodeURIComponent(spaceId)}/members/${
@@ -74,19 +86,22 @@ export async function renderMembers(runtime, spaceId) {
         });
         controls.append(remove);
         row.append(controls);
-      } else if (member.userId === runtime.session?.id && member.role !== 'OWNER') {
+      } else if (member.isCurrentUser && member.role !== 'OWNER') {
+        const currentMemberId = member.userId || runtime.session?.id;
         const leave = element(
             'button', {type: 'button', className: 'text-button remove-link'},
             'Leave');
         leave.addEventListener('click', async () => {
-          if (!window.confirm(`Leave ${
-                  space
-                      .name}? You will no longer see its products and documents.`))
-            return;
+          if (!await confirmDialog({
+            title: `Leave ${space.name}?`,
+            body: 'You will no longer see its products and documents.',
+            confirmLabel: 'Leave',
+            danger: true
+          })) return;
           try {
             await apiJson(
                 `/api/spaces/${encodeURIComponent(spaceId)}/members/${
-                    encodeURIComponent(member.userId)}`,
+                    encodeURIComponent(currentMemberId)}`,
                 {method: 'DELETE'});
             runtime.navigate('/spaces');
           } catch (error) {
@@ -104,9 +119,13 @@ export async function renderMembers(runtime, spaceId) {
     const feedback = element('div', {'aria-live': 'polite'});
     main.append(feedback);
     if (space.permissions?.canManageMembers) {
+      const inviteNotice = element('section', {className: 'notice invite-code-notice', hidden: true});
       const inviteForm = element('form', {className: 'inline-form'});
       inviteForm.append(element('h2', {}, 'Invite someone'));
-      addField(inviteForm, 'Email address', 'email', 'email', {required: ''});
+      addField(inviteForm, 'Email address', 'email', 'email', {
+        required: '',
+        placeholder: 'invitee@example.com'
+      });
       addSelect(
           inviteForm, 'Access', 'role',
           [['VIEWER', 'Viewer'], ['EDITOR', 'Editor']], 'VIEWER');
@@ -126,7 +145,7 @@ export async function renderMembers(runtime, spaceId) {
         const submit = inviteForm.querySelector('[type="submit"]');
         submit.disabled = true;
         try {
-          await apiJson(
+          const created = await apiJson(
               `/api/spaces/${encodeURIComponent(spaceId)}/invitations`, {
                 method: 'POST',
                 body: JSON.stringify({
@@ -134,13 +153,37 @@ export async function renderMembers(runtime, spaceId) {
                   role: values.get('role')
                 })
               });
-          await renderMembers(runtime, spaceId);
+          inviteNotice.hidden = false;
+          inviteNotice.replaceChildren(
+              element('h2', {}, 'Invitation code'),
+              element('p', {}, 'Give this code to the invitee. They enter it on their Invitations page. It is shown only once.'));
+          const codeInput = element('input', {
+            type: 'text', value: created.inviteCode, readOnly: '',
+            'aria-label': 'Invitation code'
+          });
+          const copy = element('button', {type: 'button', className: 'text-button'}, 'Copy');
+          const copyFeedback = element('div', {'aria-live': 'polite'});
+          copy.addEventListener('click', async () => {
+            try {
+              await navigator.clipboard.writeText(created.inviteCode);
+              showMessage(copyFeedback, 'Code copied.', 'status');
+            } catch {
+              codeInput.select();
+              document.execCommand('copy');
+              showMessage(copyFeedback, 'Select and copy the invitation code.', 'status');
+            }
+          });
+          const dismiss = element('button', {type: 'button', className: 'text-button'}, 'Dismiss');
+          dismiss.addEventListener('click', () => inviteNotice.remove());
+          inviteNotice.append(codeInput, copy, copyFeedback, dismiss);
+          inviteForm.reset();
         } catch (error) {
           showMessage(inviteFeedback, error.message);
           submit.disabled = false;
         }
       });
       main.append(inviteForm);
+      main.append(inviteNotice);
       main.append(
           element('h2', {className: 'section-title'}, 'Pending invitations'));
       const pending = element('div', {className: 'line-list'});
@@ -157,8 +200,12 @@ export async function renderMembers(runtime, spaceId) {
             'button', {className: 'text-button remove-link', type: 'button'},
             'Revoke');
         revoke.addEventListener('click', async () => {
-          if (!window.confirm(`Revoke the invitation for ${invitation.email}?`))
-            return;
+          if (!await confirmDialog({
+            title: 'Revoke this invitation?',
+            body: `The invitation for ${invitation.email} will no longer work.`,
+            confirmLabel: 'Revoke',
+            danger: true
+          })) return;
           try {
             await apiJson(
                 `/api/spaces/${encodeURIComponent(spaceId)}/invitations/${
@@ -178,6 +225,7 @@ export async function renderMembers(runtime, spaceId) {
       main.append(pending);
     }
   } catch (error) {
+    main.removeAttribute('aria-busy');
     main.replaceChildren(errorBox(error, () => renderMembers(runtime, spaceId)));
   }
 }

@@ -4,6 +4,7 @@ import com.warrantyvault.space.SpaceRole;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotBlank;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -31,8 +32,9 @@ public class InvitationController {
     }
 
     @PostMapping("/invitations/{id}/accept")
-    public ResponseEntity<InvitationService.AcceptedSpace> accept(@PathVariable String id) {
-        return ResponseEntity.ok(invitationService.acceptInvitation(id));
+    public ResponseEntity<InvitationService.AcceptedSpace> accept(@PathVariable String id,
+                                                                   @Valid @RequestBody AcceptInvitationRequest request) {
+        return ResponseEntity.ok(invitationService.acceptInvitation(id, request.code()));
     }
 
     @PostMapping("/invitations/{id}/decline")
@@ -74,4 +76,5 @@ public class InvitationController {
 
     public record CreateInvitationRequest(@Email @NotNull String email, @NotNull SpaceRole role) {}
     public record ChangeRoleRequest(@NotNull SpaceRole role) {}
+    public record AcceptInvitationRequest(@NotBlank String code) {}
 }

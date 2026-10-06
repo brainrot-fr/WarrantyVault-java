@@ -28,7 +28,8 @@ public record ProductResponse(
     Creator createdBy,
     Instant createdAt,
     Instant updatedAt,
-    Permissions permissions
+    Permissions permissions,
+    Long version
 ) {
     public record FileInfo(String contentType, long sizeBytes) {}
     public record Creator(String id, String name) {}
@@ -65,7 +66,8 @@ public record ProductResponse(
             new Creator(product.getCreatedBy().getId(), product.getCreatedBy().getName()),
             product.getCreatedAt(),
             product.getUpdatedAt(),
-            new Permissions(SpacePermissions.canEditProduct(role), SpacePermissions.canDeleteProduct(role))
+            new Permissions(SpacePermissions.canEditProduct(role), SpacePermissions.canDeleteProduct(role)),
+            product.getVersion()
         );
     }
 }

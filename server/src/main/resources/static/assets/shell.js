@@ -9,7 +9,7 @@ function navigationLink(label, href) {
   return anchor;
 }
 
-function renderHeader(authenticated, onLogout) {
+function renderHeader(authenticated, onLogout, invitationCount) {
   const header = element('header', {className: 'site-header'});
   header.append(
       link('WarrantyVault', authenticated ? '/dashboard' : '/', 'wordmark'));
@@ -19,7 +19,10 @@ function renderHeader(authenticated, onLogout) {
     nav.append(
         navigationLink('Overview', '/dashboard'),
         navigationLink('Spaces', '/spaces'),
-        navigationLink('Invitations', '/invitations'),
+        navigationLink(
+            invitationCount == null ? 'Invitations' :
+                                      `Invitations (${invitationCount})`,
+            '/invitations'),
         navigationLink('Settings', '/settings'));
     const signOut = element(
         'button', {className: 'text-button', type: 'button'}, 'Sign out');
@@ -37,9 +40,14 @@ function renderHeader(authenticated, onLogout) {
 }
 
 export function renderShell(
-    root, content, {authenticated = false, bootstrapError = '', onLogout} = {}) {
+    root, content, {
+      authenticated = false,
+      bootstrapError = '',
+      onLogout,
+      invitationCount = null
+    } = {}) {
   const page = element('div', {className: 'app-page'});
-  page.append(renderHeader(authenticated, onLogout));
+  page.append(renderHeader(authenticated, onLogout, invitationCount));
   if (bootstrapError)
     page.append(element(
         'p', {className: 'connection-banner', role: 'status'}, bootstrapError));

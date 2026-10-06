@@ -10,7 +10,7 @@ import {renderSettings} from './pages/settings.js';
 import {renderSpace} from './pages/space.js';
 import {renderSpaces} from './pages/spaces.js';
 import {renderShell} from './shell.js';
-import {element, link} from './ui.js';
+import {element, link, confirmDialog} from './ui.js';
 
 const root = document.querySelector('#app');
 const activeImageUrls = new Set();
@@ -47,6 +47,11 @@ const routes = [
 let session = null;
 let sessionState = 'loading';
 let bootstrapError = '';
+let announceNavigation = true;
+let invitationCount = null;
+let invitationFetch = null;
+let hasUnsavedChanges = false;
+let restoringHistoryEntry = false;
 
 const runtime = {
   navigate,
@@ -59,15 +64,90 @@ const runtime = {
   },
   renderShell(content, authenticated = false) {
     renderShell(
-        root, content, {authenticated, bootstrapError, onLogout: logout});
+        root, content, {
+          authenticated, bootstrapError, onLogout: logout, invitationCount
+        });
+    if (announceNavigation) {
+      const announcer = document.querySelector('#route-announcer');
+      if (announcer) announcer.textContent = document.title.replace(/ \| WarrantyVault$/, '');
+      const clearRouteFocus = () => {
+        content.classList.remove('route-focus');
+        document.removeEventListener('keydown', clearRouteFocus, true);
+        document.removeEventListener('pointerdown', clearRouteFocus, true);
+      };
+      content.classList.add('route-focus');
+      document.addEventListener('keydown', clearRouteFocus, true);
+      document.addEventListener('pointerdown', clearRouteFocus, true);
+      content.focus({preventScroll: true});
+      announceNavigation = false;
+    }
   },
   get session() {
     return session;
+  },
+  get invitationCount() {
+    return invitationCount;
+  },
+  setPageTitle(title) {
+    document.title = title === 'WarrantyVault' ? title : `${title} | WarrantyVault`;
+    const announcer = document.querySelector('#route-announcer');
+    if (announcer) announcer.textContent = title;
+  },
+  async refreshInvitations(force = false) {
+    if (!session) {
+      invitationCount = null;
+      return;
+    }
+    if (invitationFetch) {
+      await invitationFetch;
+      if (!force) return;
+    }
+    invitationFetch = apiJson('/api/invitations')
+        .then((invitations) => {
+          invitationCount = invitations.length;
+          const anchor =
+              document.querySelector('.primary-nav a[href="/invitations"]');
+          if (anchor) {
+            anchor.textContent = `Invitations (${invitationCount})`;
+            anchor.setAttribute(
+                'aria-label', `Invitations, ${invitationCount} pending`);
+          }
+        })
+        .catch((error) => {
+          bootstrapError = `Invitations could not be refreshed: ${error.message}`;
+          const page = document.querySelector('.app-page');
+          if (page && !page.querySelector('.connection-banner')) {
+            page.insertBefore(
+                element(
+                    'p',
+                    {className: 'connection-banner', role: 'status'},
+                    bootstrapError),
+                page.querySelector('#main-content'));
+          }
+        })
+        .finally(() => {
+          invitationFetch = null;
+        });
+    return invitationFetch;
+  },
+  setUnsavedChanges(value) {
+    hasUnsavedChanges = Boolean(value);
   }
 };
 
-function navigate(path, replace = false) {
+async function navigate(path, replace = false) {
+  if (hasUnsavedChanges) {
+    const proceed = await confirmDialog({
+      title: 'Discard unsaved changes?',
+      body: 'Your changes to this form have not been saved.',
+      confirmLabel: 'Discard changes',
+      danger: true
+    });
+    if (!proceed) return;
+    hasUnsavedChanges = false;
+  }
   history[replace ? 'replaceState' : 'pushState']({}, '', path);
+  announceNavigation = true;
   releaseImageUrls();
   render();
   window.scrollTo(0, 0);
@@ -94,6 +174,8 @@ function acceptSession(nextSession) {
     clearAccessToken();
   sessionState = session ? 'authenticated' : 'anonymous';
   bootstrapError = '';
+  invitationCount = null;
+  if (session) runtime.refreshInvitations();
 }
 
 async function logout() {
@@ -116,15 +198,16 @@ async function logout() {
 function renderLoading() {
   const main = element(
       'main',
-      {className: 'page-content', role: 'status', 'aria-live': 'polite'});
+      {className: 'page-content', 'aria-busy': 'true'});
   main.append(
       element('p', {className: 'eyebrow'}, 'WarrantyVault'),
       element('h1', {}, 'Restoring your session'),
-      element('p', {}, 'Please wait while we securely reconnect.'));
+      element('p', {role: 'status'}, 'Please wait while we securely reconnect.'));
   runtime.renderShell(main);
 }
 
 function renderNotFound() {
+  runtime.setPageTitle('Page not found');
   const main = element('main', {className: 'page-content'});
   main.append(
       element('p', {className: 'eyebrow'}, '404'),
@@ -185,15 +268,53 @@ document.addEventListener('click', (event) => {
   if (!anchor || event.defaultPrevented || event.button !== 0 ||
       event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
     return;
+  const href = anchor.getAttribute('href') || '';
+  if (href.startsWith('#')) return;
+  if (!['http:', 'https:'].includes(anchor.protocol) || anchor.target ||
+      anchor.hasAttribute('download') || href.startsWith('blob:'))
+    return;
   const destination = new URL(anchor.href, window.location.href);
   if (destination.origin !== window.location.origin) return;
+  if (destination.pathname === window.location.pathname &&
+      destination.search === window.location.search &&
+      destination.hash !== window.location.hash)
+    return;
   event.preventDefault();
   navigate(`${destination.pathname}${destination.search}${destination.hash}`);
 });
 
 window.addEventListener('popstate', () => {
+  if (restoringHistoryEntry) {
+    restoringHistoryEntry = false;
+    return;
+  }
+  if (hasUnsavedChanges) {
+    confirmDialog({
+      title: 'Discard unsaved changes?',
+      body: 'Your changes to this form have not been saved.',
+      confirmLabel: 'Discard changes',
+      danger: true
+    }).then((proceed) => {
+      if (!proceed) {
+        restoringHistoryEntry = true;
+        history.forward();
+        return;
+      }
+      hasUnsavedChanges = false;
+      announceNavigation = true;
+      releaseImageUrls();
+      render();
+    });
+    return;
+  }
+  announceNavigation = true;
   releaseImageUrls();
   render();
+});
+window.addEventListener('beforeunload', (event) => {
+  if (!hasUnsavedChanges) return;
+  event.preventDefault();
+  event.returnValue = '';
 });
 window.addEventListener('warrantyvault:session-expired', () => {
   acceptSession(null);

@@ -7,15 +7,19 @@ import {
   addTextarea,
   showMessage,
   formatDate,
-  errorBox
+  errorBox,
+  confirmDialog
 } from '../ui.js';
 
 export async function renderSpace(runtime, spaceId) {
-  const main = element('main', {className: 'page-content'});
+  runtime.setPageTitle('Space');
+  const main = element('main', {className: 'page-content', 'aria-busy': 'true'});
   main.append(element('p', {role: 'status'}, 'Loading Space…'));
   runtime.renderShell(main, true);
   try {
     const space = await apiJson(`/api/spaces/${encodeURIComponent(spaceId)}`);
+    runtime.setPageTitle(space.name);
+    main.removeAttribute('aria-busy');
     main.replaceChildren();
     const heading = element('div', {className: 'page-heading'});
     heading.append(
@@ -48,13 +52,15 @@ export async function renderSpace(runtime, spaceId) {
     const search = addField(
         filterForm, 'Search products', 'q', 'search',
         {placeholder: 'Name, brand, or model', required: false});
+    search.setAttribute('aria-controls', 'product-results');
     const status = addSelect(
         filterForm, 'Warranty status', 'status',
         [
           ['', 'All statuses'], ['ACTIVE', 'Active'],
           ['EXPIRING_SOON', 'Expiring soon'], ['EXPIRED', 'Expired']
         ],
-        '');
+        '',
+        {required: false});
     const sort = addSelect(
         filterForm, 'Sort', 'sort',
         [
@@ -62,8 +68,9 @@ export async function renderSpace(runtime, spaceId) {
           ['name', 'Product name']
         ],
         'expiry');
-    const productRegion = element('section', {'aria-live': 'polite'});
-    const pageControls = element('div', {className: 'page-controls'});
+    const productRegion = element('section', {id: 'product-results'});
+    const pageControls = element(
+        'nav', {className: 'page-controls', 'aria-label': 'Product pages'});
     main.append(filterForm, productRegion, pageControls);
 
     let page = 0;
@@ -71,6 +78,7 @@ export async function renderSpace(runtime, spaceId) {
     const loadProducts = async (reset = true) => {
       if (reset) page = 0;
       const request = ++currentRequest;
+      productRegion.setAttribute('aria-busy', 'true');
       productRegion.replaceChildren(
           element('p', {role: 'status'}, 'Loading products…'));
       const params = new URLSearchParams(
@@ -81,7 +89,12 @@ export async function renderSpace(runtime, spaceId) {
         const results = await apiJson(
             `/api/spaces/${encodeURIComponent(spaceId)}/products?${params}`);
         if (request !== currentRequest) return;
+        productRegion.removeAttribute('aria-busy');
         productRegion.replaceChildren();
+        productRegion.append(element(
+            'p',
+            {role: 'status', className: 'sr-only'},
+            `${results.totalItems} product${results.totalItems === 1 ? '' : 's'} found.`));
         if (!results.items.length) {
           productRegion.append(element(
               'p', {className: 'empty-note'},
@@ -133,7 +146,7 @@ export async function renderSpace(runtime, spaceId) {
         }
         pageControls.append(element(
             'span', {},
-            `${results.totalItems} products · page ${results.page + 1} of ${
+            `Page ${results.page + 1} of ${
                 Math.max(results.totalPages, 1)}`));
         if (results.page + 1 < results.totalPages) {
           const next = element(
@@ -146,9 +159,11 @@ export async function renderSpace(runtime, spaceId) {
           pageControls.append(next);
         }
       } catch (error) {
-        if (request === currentRequest)
+        if (request === currentRequest) {
+          productRegion.removeAttribute('aria-busy');
           productRegion.replaceChildren(
               errorBox(error, () => loadProducts(false)));
+        }
       }
     };
     let filterTimer;
@@ -164,19 +179,28 @@ export async function renderSpace(runtime, spaceId) {
     });
     await loadProducts();
   } catch (error) {
+    main.removeAttribute('aria-busy');
     main.replaceChildren(errorBox(error, () => renderSpace(runtime, spaceId)));
   }
 }
 
 function openSpaceEditor(space, runtime) {
-  const dialog = element('dialog', {className: 'app-dialog'});
+  const titleId = `space-edit-title-${crypto.randomUUID()}`;
+  const dialog = element(
+      'dialog', {className: 'app-dialog', 'aria-labelledby': titleId});
   const form = element('form', {className: 'form-column'});
-  form.append(element('h2', {}, 'Space settings'));
-  const name =
-      addField(form, 'Name', 'name', 'text', {maxlength: '80', required: ''});
+  form.append(element('h2', {id: titleId}, 'Space settings'));
+  const name = addField(form, 'Name', 'name', 'text', {
+    maxlength: '80',
+    required: '',
+    placeholder: 'e.g. Home'
+  });
   name.value = space.name;
   const description =
-      addTextarea(form, 'Description', 'description', {maxlength: '255'});
+      addTextarea(form, 'Description', 'description', {
+        maxlength: '255',
+        placeholder: 'Add a short description'
+      });
   description.value = space.description || '';
   const feedback = element('div', {'aria-live': 'polite'});
   form.append(feedback);
@@ -194,10 +218,12 @@ function openSpaceEditor(space, runtime) {
         'button', {type: 'button', className: 'text-button remove-link'},
         'Delete Space and products');
     remove.addEventListener('click', async () => {
-      if (!window.confirm(`Delete ${
-              space
-                  .name}, its products, and stored images? This cannot be undone.`))
-        return;
+      if (!await confirmDialog({
+        title: `Delete ${space.name}?`,
+        body: `The Space, ${space.productCount} products, and their stored images will be removed. This cannot be undone.`,
+        confirmLabel: 'Delete Space',
+        danger: true
+      })) return;
       remove.disabled = true;
       try {
         await apiJson(
@@ -221,7 +247,7 @@ function openSpaceEditor(space, runtime) {
         method: 'PATCH',
         body: JSON.stringify({
           name: String(values.get('name')).trim(),
-          description: String(values.get('description')).trim() || null
+          description: String(values.get('description')).trim()
         })
       });
       dialog.close();

@@ -43,7 +43,7 @@ class InvitationServiceTest {
         when(invitations.findById("invitation-id")).thenReturn(Optional.of(invitation));
         when(members.findBySpaceAndUser(space, invitee)).thenReturn(Optional.of(new SpaceMember()));
 
-        ApiException error = assertThrows(ApiException.class, () -> service.acceptInvitation("invitation-id"));
+        ApiException error = assertThrows(ApiException.class, () -> service.acceptInvitation("invitation-id", null));
 
         assertEquals("ALREADY_MEMBER", error.getCode());
         assertEquals(409, error.getStatus());
@@ -54,10 +54,11 @@ class InvitationServiceTest {
         Invitation invitation = invitation("invitee@example.test", "PENDING", "2026-09-30T00:00:00Z");
         when(invitations.findById("invitation-id")).thenReturn(Optional.of(invitation));
 
-        ApiException error = assertThrows(ApiException.class, () -> service.acceptInvitation("invitation-id"));
+        ApiException error = assertThrows(ApiException.class, () -> service.acceptInvitation("invitation-id", null));
 
         assertEquals("INVITE_EXPIRED", error.getCode());
         assertEquals(409, error.getStatus());
+        assertEquals("EXPIRED", invitation.getStatus());
     }
 
     @Test
@@ -65,7 +66,7 @@ class InvitationServiceTest {
         when(invitations.findById("invitation-id"))
             .thenReturn(Optional.of(invitation("other@example.test", "PENDING", "2026-10-10T00:00:00Z")));
 
-        ApiException error = assertThrows(ApiException.class, () -> service.acceptInvitation("invitation-id"));
+        ApiException error = assertThrows(ApiException.class, () -> service.acceptInvitation("invitation-id", null));
 
         assertEquals("NOT_FOUND", error.getCode());
         assertEquals(404, error.getStatus());
@@ -76,7 +77,7 @@ class InvitationServiceTest {
         when(invitations.findById("invitation-id"))
             .thenReturn(Optional.of(invitation("invitee@example.test", "REVOKED", "2026-10-10T00:00:00Z")));
 
-        ApiException error = assertThrows(ApiException.class, () -> service.acceptInvitation("invitation-id"));
+        ApiException error = assertThrows(ApiException.class, () -> service.acceptInvitation("invitation-id", null));
 
         assertEquals("NOT_FOUND", error.getCode());
         assertEquals(404, error.getStatus());

@@ -3,6 +3,7 @@ package com.warrantyvault.dashboard;
 import com.warrantyvault.product.Product;
 import com.warrantyvault.product.ProductRepository;
 import com.warrantyvault.product.CurrencyValueTotal;
+import com.warrantyvault.product.DashboardCounts;
 import com.warrantyvault.config.AppProperties;
 import com.warrantyvault.user.User;
 import java.math.RoundingMode;
@@ -17,6 +18,7 @@ import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
 
 @Service
 public class DashboardService {
@@ -40,42 +42,17 @@ public class DashboardService {
         LocalDate today = LocalDate.now(clock.withZone(zone));
         int thresholdDays = appProperties.getExpiringSoonDays();
 
-        List<Product> products = productRepository.findAllForDashboard(user.getId());
-
-        int active = 0;
-        int expiringSoon = 0;
-        int expired = 0;
-        List<ProductSummary> upcoming = new ArrayList<>();
-        List<ProductSummary> recentlyExpired = new ArrayList<>();
-
-        for (Product product : products) {
-            long daysRemaining = ChronoUnit.DAYS.between(today, product.getExpiresOn());
-            String status = daysRemaining < 0 ? "EXPIRED"
-                : daysRemaining <= thresholdDays ? "EXPIRING_SOON" : "ACTIVE";
-            switch (status) {
-                case "ACTIVE" -> active++;
-                case "EXPIRING_SOON" -> expiringSoon++;
-                default -> expired++;
-            }
-            ProductSummary summary = new ProductSummary(
-                product.getId(),
-                product.getSpace().getId(),
-                product.getSpace().getName(),
-                product.getProductType(),
-                product.getBrand(),
-                product.getExpiresOn(),
-                daysRemaining,
-                status
-            );
-            if (daysRemaining >= 0) upcoming.add(summary);
-            else if (daysRemaining >= -RECENT_EXPIRY_DAYS) recentlyExpired.add(summary);
-        }
-
-        Comparator<ProductSummary> expiryOrder = Comparator.comparing(ProductSummary::expiresOn)
-            .thenComparing(ProductSummary::productType)
-            .thenComparing(ProductSummary::brand);
-        upcoming.sort(expiryOrder);
-        recentlyExpired.sort(Comparator.comparingLong(ProductSummary::daysRemaining).reversed());
+        DashboardCounts totals = productRepository.findDashboardCounts(user.getId(), today, today.plusDays(thresholdDays));
+        int active = totals == null || totals.active() == null ? 0 : totals.active().intValue();
+        int expiringSoon = totals == null || totals.expiringSoon() == null ? 0 : totals.expiringSoon().intValue();
+        int expired = totals == null || totals.expired() == null ? 0 : totals.expired().intValue();
+        List<ProductSummary> upcoming = productRepository.findUpcomingForDashboard(
+            user.getId(), today, PageRequest.of(0, UPCOMING_LIMIT)).stream()
+            .map(product -> summary(product, today)).toList();
+        List<ProductSummary> recentlyExpired = productRepository.findRecentlyExpiredForDashboard(
+            user.getId(), today.minusDays(RECENT_EXPIRY_DAYS), today.minusDays(1),
+            PageRequest.of(0, RECENTLY_EXPIRED_LIMIT)).stream()
+            .map(product -> summary(product, today)).toList();
 
         Map<String, String> coveredValue = new LinkedHashMap<>();
         for (CurrencyValueTotal total : productRepository.findCoveredValueTotals(user.getId(), today)) {
@@ -85,10 +62,18 @@ public class DashboardService {
         return new DashboardResponse(
             new Counts(active, expiringSoon, expired),
             thresholdDays,
-            List.copyOf(upcoming.subList(0, Math.min(upcoming.size(), UPCOMING_LIMIT))),
-            List.copyOf(recentlyExpired.subList(0, Math.min(recentlyExpired.size(), RECENTLY_EXPIRED_LIMIT))),
+            List.copyOf(upcoming),
+            List.copyOf(recentlyExpired),
             coveredValue
         );
+    }
+
+    private ProductSummary summary(Product product, LocalDate today) {
+        long daysRemaining = ChronoUnit.DAYS.between(today, product.getExpiresOn());
+        String status = daysRemaining < 0 ? "EXPIRED"
+            : daysRemaining <= appProperties.getExpiringSoonDays() ? "EXPIRING_SOON" : "ACTIVE";
+        return new ProductSummary(product.getId(), product.getSpace().getId(), product.getSpace().getName(),
+            product.getProductType(), product.getBrand(), product.getExpiresOn(), daysRemaining, status);
     }
 
     public record Counts(int active, int expiringSoon, int expired) {}

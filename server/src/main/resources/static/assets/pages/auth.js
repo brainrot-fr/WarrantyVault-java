@@ -3,11 +3,14 @@ import {
   element,
   link,
   addField,
-  appendFieldErrors,
+  addPasswordToggle,
+  showFieldErrors,
+  safeNext,
   showMessage
 } from '../ui.js';
 
 export function renderAuth(registration, runtime) {
+  runtime.setPageTitle(registration ? 'Create account' : 'Sign in');
   const main = element('main', {className: 'page-content'});
   const layout = element('div', {className: 'auth-layout'});
   const statement = element('section', {className: 'auth-statement'});
@@ -29,22 +32,36 @@ export function renderAuth(registration, runtime) {
   form.append(
       element('h2', {}, registration ? 'Create your vault' : 'Sign in'));
   const errorRegion = element('div', {'aria-live': 'polite'});
-  const nameInput = registration ?
-      addField(
-          form, 'Your name', 'name', 'text',
-          {autocomplete: 'name', minlength: '2', maxlength: '120'}) :
-      null;
-  const emailInput = addField(
-      form, 'Email address', 'email', 'email', {autocomplete: 'email'});
+  if (registration) {
+    addField(
+        form, 'Your name', 'name', 'text',
+        {
+          autocomplete: 'name',
+          minlength: '2',
+          maxlength: '120',
+          placeholder: 'Your name'
+        });
+  }
+  addField(form, 'Email address', 'email', 'email', {
+    autocomplete: 'email',
+    placeholder: 'you@example.com'
+  });
   const passwordInput = addField(form, 'Password', 'password', 'password', {
     autocomplete: registration ? 'new-password' : 'current-password',
     minlength: registration ? '8' : undefined,
-    maxlength: '72'
+    maxlength: '72',
+    placeholder: registration ? 'At least 8 characters' : 'Enter your password'
   });
+  addPasswordToggle(passwordInput);
   if (registration)
-    addField(
+    addPasswordToggle(addField(
         form, 'Confirm password', 'confirmPassword', 'password',
-        {autocomplete: 'new-password'});
+        {autocomplete: 'new-password', placeholder: 'Re-enter your password'}));
+  if (registration) {
+    form.append(element(
+        'p', {className: 'muted password-guidance'},
+        'Use at least 8 characters. A longer, unique passphrase is easier to remember and harder to guess. Avoid common passwords.'));
+  }
   form.append(
       errorRegion,
       element(
@@ -97,14 +114,14 @@ export function renderAuth(registration, runtime) {
           });
       runtime.acceptSession(nextSession);
       const next = new URLSearchParams(window.location.search).get('next');
-      runtime.navigate(
-          next?.startsWith('/') && !next.startsWith('//') ? next : '/dashboard',
-          true);
+      runtime.navigate(safeNext(next), true);
     } catch (error) {
       showMessage(errorRegion, error.message);
-      const firstField =
-          appendFieldErrors(errorRegion, form, error.fieldErrors);
-      if (firstField instanceof HTMLElement) firstField.focus();
+      showFieldErrors(form, error.fieldErrors, {
+        name: 'Name',
+        email: 'Email address',
+        password: 'Password'
+      });
     } finally {
       submit.disabled = false;
       submit.textContent = registration ? 'Create account' : 'Sign in';
@@ -113,5 +130,4 @@ export function renderAuth(registration, runtime) {
   layout.append(statement, form);
   main.append(layout);
   runtime.renderShell(main);
-  (registration ? nameInput : emailInput).focus();
 }

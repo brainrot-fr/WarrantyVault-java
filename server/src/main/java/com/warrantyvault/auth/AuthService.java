@@ -16,6 +16,8 @@ import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -29,7 +31,7 @@ import jakarta.servlet.http.HttpServletResponse;
 public class AuthService {
     private static final long REFRESH_TOKEN_TTL_SECONDS = 30L * 24 * 60 * 60;
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
-    private static final long ROTATION_GRACE_SECONDS = 15;
+    private static final Logger logger = LoggerFactory.getLogger(AuthService.class);
 
     private final JwtService jwtService;
     private final RefreshTokenRepository refreshTokenRepository;
@@ -62,12 +64,12 @@ public class AuthService {
         writeRefreshCookie(response, raw, REFRESH_TOKEN_TTL_SECONDS);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ApiException.class)
     public User refreshSession(String rawToken, HttpServletResponse response) {
         return refreshSession(rawToken, response, null);
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ApiException.class)
     public User refreshSession(String rawToken, HttpServletResponse response, String userAgent) {
         Instant now = Instant.now(clock);
         String tokenHash = sha256(rawToken);
@@ -77,7 +79,7 @@ public class AuthService {
         if (token.getRevokedAt() != null) {
             GraceToken grace = graceTokens.get(tokenHash);
             if (token.getReplacedBy() != null
-                && token.getRevokedAt().plusSeconds(ROTATION_GRACE_SECONDS).isAfter(now)
+                && token.getRevokedAt().plusSeconds(appProperties.getRefreshGraceSeconds()).isAfter(now)
                 && grace != null && grace.expiresAt().isAfter(now)) {
                 writeRefreshCookie(response, grace.rawToken(), REFRESH_TOKEN_TTL_SECONDS);
                 return token.getUser();
@@ -103,7 +105,7 @@ public class AuthService {
         token.setRevokedAt(now);
         token.setReplacedBy(newToken.getId());
         refreshTokenRepository.save(token);
-        graceTokens.put(tokenHash, new GraceToken(newRaw, now.plusSeconds(ROTATION_GRACE_SECONDS)));
+        graceTokens.put(tokenHash, new GraceToken(newRaw, now.plusSeconds(appProperties.getRefreshGraceSeconds())));
         writeRefreshCookie(response, newRaw, REFRESH_TOKEN_TTL_SECONDS);
         return user;
     }
@@ -125,12 +127,13 @@ public class AuthService {
     @Scheduled(cron = "0 15 3 * * *")
     @Transactional
     public void cleanExpiredTokens() {
-        Instant cutoff = Instant.now(clock).minusSeconds(REFRESH_TOKEN_TTL_SECONDS);
-        refreshTokenRepository.deleteByExpiresAtBeforeOrRevokedAtBefore(cutoff, cutoff);
+        Instant cutoff = Instant.now(clock).minusSeconds(30L * 24 * 60 * 60);
+        int deleted = refreshTokenRepository.deleteStale(cutoff);
+        logger.info("Deleted {} stale refresh tokens", deleted);
         graceTokens.entrySet().removeIf(entry -> !entry.getValue().expiresAt().isAfter(Instant.now(clock)));
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = ApiException.class)
     public void logout(String rawToken, HttpServletResponse response) {
         if (rawToken != null && !rawToken.isBlank()) {
             refreshTokenRepository.findByTokenHashForUpdate(sha256(rawToken)).ifPresent(token -> {
@@ -152,7 +155,7 @@ public class AuthService {
     private void writeRefreshCookie(HttpServletResponse response, String value, long maxAgeSeconds) {
         ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from("wv_refresh", value)
             .httpOnly(true)
-            .secure(false)
+            .secure(appProperties.getCookie().isSecure())
             .path("/api")
             .sameSite(appProperties.getCookie().getSameSite())
             .maxAge(maxAgeSeconds);

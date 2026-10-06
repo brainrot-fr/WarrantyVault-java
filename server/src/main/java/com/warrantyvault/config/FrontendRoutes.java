@@ -1,6 +1,5 @@
 package com.warrantyvault.config;
 
-import org.springframework.context.annotation.Configuration;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import jakarta.servlet.http.HttpServletRequest;
@@ -10,34 +9,57 @@ import org.springframework.core.io.ClassPathResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.MediaTypeFactory;
 import org.springframework.stereotype.Controller;
+import org.springframework.http.CacheControl;
+import java.io.IOException;
 
-@Configuration
 @Controller
 public class FrontendRoutes {
     @RequestMapping(value = "/{*path}", method = {RequestMethod.GET, RequestMethod.HEAD})
     public ResponseEntity<Resource> forwardToFrontend(HttpServletRequest request) {
         String path = request.getRequestURI();
-        if (path.equals("/api") || path.startsWith("/api/")) {
+        if (path.equals("/api") || path.startsWith("/api/") || unsafe(path)) {
             return ResponseEntity.notFound().build();
         }
-        if (isAssetPath(path)) {
-            if (path.startsWith("/assets") && !path.substring(path.lastIndexOf('/') + 1).contains(".")) {
-                return ResponseEntity.notFound().build();
-            }
+        if (path.equals("/index.html")) return shell();
+        if (path.startsWith("/assets/") && hasExtension(path)) {
             Resource asset = new ClassPathResource("static" + path);
             if (!asset.exists()) return ResponseEntity.notFound().build();
-            return ResponseEntity.ok()
+            ResponseEntity.BodyBuilder response = ResponseEntity.ok()
                 .contentType(MediaTypeFactory.getMediaType(asset).orElse(MediaType.APPLICATION_OCTET_STREAM))
-                .body(asset);
+                .cacheControl(CacheControl.maxAge(java.time.Duration.ofHours(1))
+                    .cachePublic().mustRevalidate());
+            try {
+                response.lastModified(asset.lastModified());
+            } catch (IOException ignored) {
+                // Conditional revalidation is optional when the resource has no readable timestamp.
+            }
+            return response.body(asset);
         }
+        if (path.startsWith("/assets") || hasExtension(path)) return ResponseEntity.notFound().build();
+        return shell();
+    }
+
+    private ResponseEntity<Resource> shell() {
         Resource index = new ClassPathResource("static/index.html");
-        return ResponseEntity.ok()
+        ResponseEntity.BodyBuilder response = ResponseEntity.ok()
             .contentType(MediaType.TEXT_HTML)
-            .body(index);
+            .cacheControl(CacheControl.noCache());
+        try {
+            response.lastModified(index.lastModified());
+        } catch (IOException ignored) {
+            // The shell remains available if the classpath resource has no timestamp.
+        }
+        return response.body(index);
     }
 
-    private boolean isAssetPath(String path) {
-        return path.contains(".") || path.equals("/assets") || path.startsWith("/assets/");
+    private boolean unsafe(String path) {
+        return path.contains("..") || path.contains("\\") || path.contains("%")
+            || path.indexOf('\0') >= 0 || path.contains("//");
     }
 
+    private boolean hasExtension(String path) {
+        String name = path.substring(path.lastIndexOf('/') + 1);
+        int dot = name.lastIndexOf('.');
+        return dot > 0 && dot < name.length() - 1;
+    }
 }

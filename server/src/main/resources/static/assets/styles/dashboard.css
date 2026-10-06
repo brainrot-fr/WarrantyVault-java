@@ -158,4 +158,33 @@
 }
 .toolbar-actions,
 .member-actions,
-.dialog-actions,
+.dialog-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.product-summary-link {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: none;
+}
+.product-summary {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.product-summary-link:hover .product-summary strong {
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+.space-row,
+.product-row,
+.invitation-row {
+  min-width: 0;
+}

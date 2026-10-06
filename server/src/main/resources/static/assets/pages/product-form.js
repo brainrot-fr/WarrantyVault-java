@@ -6,12 +6,13 @@ import {
   addSelect,
   addTextarea,
   showMessage,
-  appendFieldErrors,
+  showFieldErrors,
   errorBox
 } from '../ui.js';
 
 export function renderProductForm(runtime, spaceId, productId) {
-  const main = element('main', {className: 'page-content'});
+  runtime.setPageTitle(productId ? 'Edit product' : 'Add product');
+  const main = element('main', {className: 'page-content', 'aria-busy': 'true'});
   main.append(element(
       'p', {role: 'status'},
       productId ? 'Loading product…' : 'Loading Space…'));
@@ -21,11 +22,7 @@ export function renderProductForm(runtime, spaceId, productId) {
         apiJson(`/api/spaces/${encodeURIComponent(spaceId)}`),
         productId ? apiJson(`/api/products/${encodeURIComponent(productId)}`) :
                     Promise.resolve(null),
-        apiJson('/api/products/facets').catch((error) => {
-          console.error(
-              'Product facets could not be loaded:', error.code || error.name);
-          return {types: [], brands: []};
-        })
+        apiJson('/api/products/facets')
       ])
       .then(([space, product, facets]) => {
         if (!product && !space.permissions?.canCreateProducts)
@@ -33,6 +30,8 @@ export function renderProductForm(runtime, spaceId, productId) {
               'You do not have permission to add products to this Space.');
         if (productId && !product.permissions?.canEdit)
           throw new Error('You do not have permission to edit this product.');
+        runtime.setPageTitle(productId ? 'Edit product' : 'Add product');
+        main.removeAttribute('aria-busy');
         main.replaceChildren();
         const heading = element('div', {className: 'page-heading'});
         heading.append(
@@ -48,67 +47,137 @@ export function renderProductForm(runtime, spaceId, productId) {
         main.append(buildProductForm(runtime, spaceId, product, facets));
       })
       .catch(
-          (error) => main.replaceChildren(
-              errorBox(error, () => renderProductForm(runtime, spaceId, productId))));
+          (error) => {
+            main.removeAttribute('aria-busy');
+            main.replaceChildren(
+                errorBox(error, () => renderProductForm(runtime, spaceId, productId)));
+          });
 }
 
 function buildProductForm(runtime, spaceId, product, facets) {
   const form = element('form', {className: 'product-form'});
   const feedback = element('div', {'aria-live': 'polite'});
+  const details = element('fieldset', {className: 'form-section'});
+  details.append(element('legend', {}, 'Product details'));
   const productType = addField(
-      form, 'Product type', 'productType', 'text',
-      {maxlength: '60', required: '', list: 'product-types'});
+      details, 'Product type', 'productType', 'text',
+      {
+        maxlength: '60',
+        required: '',
+        list: 'product-types',
+        placeholder: 'e.g. Refrigerator'
+      });
   const typeList = element('datalist', {id: 'product-types'});
   for (const type of facets.types || [])
     typeList.append(element('option', {value: type}));
   productType.after(typeList);
   const brand = addField(
-      form, 'Brand', 'brand', 'text',
-      {maxlength: '60', required: '', list: 'product-brands'});
+      details, 'Brand', 'brand', 'text',
+      {
+        maxlength: '60',
+        required: '',
+        list: 'product-brands',
+        placeholder: 'e.g. Acme'
+      });
   const brandList = element('datalist', {id: 'product-brands'});
   for (const value of facets.brands || [])
     brandList.append(element('option', {value}));
   brand.after(brandList);
   const model = addField(
-      form, 'Model', 'modelName', 'text', {maxlength: '120', required: false});
+      details, 'Model', 'modelName', 'text',
+      {maxlength: '120', required: false, placeholder: 'e.g. XR-200'});
   const serial = addField(
-      form, 'Serial number', 'serialNumber', 'text',
-      {maxlength: '120', required: false});
+      details, 'Serial number', 'serialNumber', 'text',
+      {maxlength: '120', required: false, placeholder: 'Enter the serial number'});
+  form.append(details);
+  const coverage = element('fieldset', {className: 'form-section'});
+  coverage.append(element('legend', {}, 'Purchase and coverage'));
   const purchased = addField(
-      form, 'Purchased on', 'purchasedOn', 'date',
-      {required: '', max: new Date().toISOString().slice(0, 10)});
+      coverage, 'Purchased on', 'purchasedOn', 'date',
+      {
+        required: '',
+        max: todayInTimezone(runtime.session?.timezone || 'UTC')
+      });
   const months = addField(
-      form, 'Warranty period (months)', 'warrantyMonths', 'number',
-      {min: '1', max: '120', required: ''});
+      coverage, 'Warranty period (months)', 'warrantyMonths', 'number',
+      {
+        min: '1',
+        max: '120',
+        required: '',
+        placeholder: 'e.g. 24',
+        hint: 'From 1 to 120 months.'
+      });
   const price = addField(
-      form, 'Purchase price', 'purchasePrice', 'number',
-      {min: '0', step: '0.01', required: ''});
+      coverage, 'Purchase price', 'purchasePrice', 'number',
+      {
+        min: '0',
+        step: '0.01',
+        required: '',
+        placeholder: 'e.g. 499.00',
+        hint: 'Enter the amount paid.'
+      });
   addSelect(
-      form, 'Currency', 'currency',
+      coverage, 'Currency', 'currency',
       [
         ...new Set([
           'INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', product?.currency
         ].filter(Boolean))
       ].map((currency) => [currency, currency]),
       product?.currency || runtime.session?.currency || 'INR');
-  addTextarea(form, 'Notes', 'notes', {maxlength: '1000'});
+  form.append(coverage);
+  const notesField = element('fieldset', {className: 'form-section'});
+  notesField.append(element('legend', {}, 'Notes'));
+  addTextarea(notesField, 'Notes', 'notes', {
+    maxlength: '1000',
+    placeholder: 'Add useful details about this product'
+  });
+  form.append(notesField);
+  const documents = element('fieldset', {className: 'form-section'});
+  documents.append(element('legend', {}, 'Documents'));
   const bill = addField(
-      form,
+      documents,
       productIdExists(product) ? 'Replace purchase bill (optional)' :
                                  'Purchase bill (required)',
       'bill', 'file',
-      {accept: 'image/jpeg,image/png,image/webp', required: !product});
+      {
+        accept: 'image/jpeg,image/png,image/webp',
+        required: !product,
+        hint: 'JPEG, PNG, or WebP. Maximum 10 MB.'
+      });
   const card = addField(
-      form, 'Warranty card (optional)', 'warrantyCard', 'file',
-      {accept: 'image/jpeg,image/png,image/webp', required: false});
+      documents, 'Warranty card (optional)', 'warrantyCard', 'file',
+      {
+        accept: 'image/jpeg,image/png,image/webp',
+        required: false,
+        hint: 'Optional. JPEG, PNG, or WebP. Maximum 10 MB.'
+      });
+  form.append(documents);
   let removeCard;
   if (product?.hasWarrantyCard) {
     const wrapper = element('label', {className: 'checkbox-field'});
     removeCard =
         element('input', {type: 'checkbox', name: 'removeWarrantyCard'});
     wrapper.append(removeCard, ' Remove current warranty card');
-    form.append(wrapper);
+    documents.append(wrapper);
+    removeCard.addEventListener('change', () => {
+      card.disabled = removeCard.checked;
+    });
   }
+  card.addEventListener('change', () => {
+    if (card.files.length && removeCard) removeCard.checked = false;
+    if (removeCard) {
+      removeCard.disabled = card.files.length > 0;
+      card.disabled = removeCard.checked;
+    }
+  });
+  const billError = element('p', {className: 'field-error', hidden: true});
+  billError.id = 'field-bill-size-error';
+  bill.after(billError);
+  const cardError = element('p', {className: 'field-error', hidden: true});
+  cardError.id = 'field-warrantyCard-size-error';
+  card.after(cardError);
+  addFilePreview(runtime, bill, 'Selected purchase bill preview');
+  addFilePreview(runtime, card, 'Selected warranty card preview');
   productType.value = product?.productType || '';
   brand.value = product?.brand || '';
   model.value = product?.modelName || '';
@@ -132,6 +201,22 @@ function buildProductForm(runtime, spaceId, product, facets) {
     if (!form.reportValidity()) return;
     const chosenBill = bill.files[0];
     const chosenCard = card.files[0];
+    billError.hidden = true;
+    cardError.hidden = true;
+    for (const [file, input, error] of [
+             [chosenBill, bill, billError], [chosenCard, card, cardError]]) {
+      if (file && file.size > 10 * 1024 * 1024) {
+        error.textContent = 'This image is larger than 10 MB. Choose a smaller one.';
+        error.hidden = false;
+        input.setAttribute('aria-invalid', 'true');
+        const describedBy = new Set((input.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean));
+        describedBy.add(error.id);
+        input.setAttribute('aria-describedby', [...describedBy].join(' '));
+        input.focus();
+        return;
+      }
+      input.removeAttribute('aria-invalid');
+    }
     for (const [file, label] of [
              [chosenBill, 'bill'], [chosenCard, 'warranty card']]) {
       if (file &&
@@ -154,6 +239,7 @@ function buildProductForm(runtime, spaceId, product, facets) {
       notes: String(values.get('notes')).trim() || null
     };
     if (product) payloadData.removeWarrantyCard = Boolean(removeCard?.checked);
+    if (product) payloadData.version = product.version;
     const payload = new FormData();
     payload.append(
         'data',
@@ -162,22 +248,114 @@ function buildProductForm(runtime, spaceId, product, facets) {
     if (chosenCard) payload.append('warrantyCard', chosenCard);
     const submit = form.querySelector('[type="submit"]');
     submit.disabled = true;
+    submit.textContent = product ? 'Saving product…' : 'Adding product…';
     try {
       const saved = await apiJson(
           product ? `/api/products/${encodeURIComponent(product.id)}` :
                     `/api/spaces/${encodeURIComponent(spaceId)}/products`,
-          {method: product ? 'PUT' : 'POST', body: payload});
+          {method: product ? 'PUT' : 'POST', body: payload, timeoutMs: 120000});
+      runtime.setUnsavedChanges(false);
       runtime.navigate(
           `/spaces/${encodeURIComponent(spaceId)}/products/${
               encodeURIComponent(saved.id)}`,
           true);
     } catch (error) {
       showMessage(feedback, error.message);
-      appendFieldErrors(feedback, form, error.fieldErrors);
+      if (error.code === 'CONCURRENT_UPDATE') {
+        const reload = element(
+            'button', {type: 'button', className: 'button button-quiet'},
+            'Reload current product');
+        reload.addEventListener('click', () => {
+          runtime.setUnsavedChanges(false);
+          runtime.navigate(
+              `/spaces/${encodeURIComponent(spaceId)}/products/${
+                  encodeURIComponent(product.id)}/edit`,
+              true);
+        });
+        feedback.append(reload);
+      }
+      showFieldErrors(form, error.fieldErrors, {
+        productType: 'Product type',
+        brand: 'Brand',
+        purchasedOn: 'Purchased on',
+        warrantyMonths: 'Warranty period',
+        purchasePrice: 'Purchase price',
+        currency: 'Currency',
+        bill: 'Purchase bill',
+        warrantyCard: 'Warranty card'
+      });
       submit.disabled = false;
+      submit.textContent = product ? 'Save product' : 'Add product';
     }
   });
+  form.addEventListener('input', () => runtime.setUnsavedChanges(true));
+  form.addEventListener('change', () => runtime.setUnsavedChanges(true));
   return form;
+}
+
+function addFilePreview(runtime, input, label) {
+  const preview = element('figure', {className: 'selected-image-preview', hidden: true});
+  const caption = element('figcaption', {}, label);
+  preview.append(caption);
+  input.after(preview);
+  let currentUrl = null;
+  input.addEventListener('change', () => {
+    if (currentUrl) URL.revokeObjectURL(currentUrl);
+    currentUrl = null;
+    const file = input.files?.[0];
+    if (!file) {
+      preview.hidden = true;
+      preview.replaceChildren(caption);
+      clearSizeError(input);
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      preview.hidden = false;
+      const errorId = `${input.id}-size-error`;
+      const describedBy =
+          new Set((input.getAttribute('aria-describedby') || '')
+                      .split(/\s+/).filter(Boolean));
+      describedBy.add(errorId);
+      input.setAttribute('aria-describedby', [...describedBy].join(' '));
+      input.setAttribute('aria-invalid', 'true');
+      preview.replaceChildren(
+          caption,
+          element(
+              'p', {className: 'field-error', id: errorId, role: 'alert'},
+              'This image is larger than 10 MB. Choose a smaller one.'));
+      return;
+    }
+    clearSizeError(input);
+    currentUrl = URL.createObjectURL(file);
+    runtime.trackImageUrl(currentUrl);
+    preview.hidden = false;
+    preview.replaceChildren(
+        caption,
+        element('img', {src: currentUrl, alt: `Preview of ${file.name}`}));
+  });
+}
+
+function clearSizeError(input) {
+  const errorId = `${input.id}-size-error`;
+  input.removeAttribute('aria-invalid');
+  const describedBy = (input.getAttribute('aria-describedby') || '')
+                          .split(/\s+/)
+                          .filter((id) => id && id !== errorId);
+  if (describedBy.length)
+    input.setAttribute('aria-describedby', describedBy.join(' '));
+  else
+    input.removeAttribute('aria-describedby');
+}
+
+function todayInTimezone(timezone) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(({type, value}) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 function productIdExists(product) {

@@ -19,7 +19,8 @@ public record ProductUpdateRequest(
     @NotBlank @DecimalMin("0.00") @Digits(integer = 10, fraction = 2) String purchasePrice,
     @Pattern(regexp = "^[A-Za-z]{3}$") String currency,
     @Size(max = 1000) String notes,
-    boolean removeWarrantyCard
+    boolean removeWarrantyCard,
+    Long version
 ) {
     public ProductCreateRequest asCreateRequest() {
         return new ProductCreateRequest(productType, brand, modelName, serialNumber, purchasedOn,

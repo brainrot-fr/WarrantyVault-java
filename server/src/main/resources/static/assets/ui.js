@@ -21,19 +21,107 @@ export function link(label, href, className = '') {
   return element('a', {href, className}, label);
 }
 
+export function safeNext(value) {
+  if (typeof value !== 'string') return '/dashboard';
+  try {
+    const url = new URL(value, window.location.origin);
+    return url.origin === window.location.origin && url.pathname.startsWith('/') &&
+        !value.includes('\\') && !value.startsWith('//') ?
+        url.pathname + url.search : '/dashboard';
+  } catch {
+    return '/dashboard';
+  }
+}
+
 export function showMessage(container, message, role = 'alert') {
   container.replaceChildren(element(
       'p', {role, className: role === 'alert' ? 'form-error' : 'notice'},
       message));
 }
+
+export function confirmDialog({title, body, confirmLabel, danger = false}) {
+  return new Promise((resolve) => {
+    const trigger = document.activeElement;
+    const titleId = `confirm-title-${crypto.randomUUID()}`;
+    const dialog = element('dialog', {className: 'confirm-dialog', 'aria-labelledby': titleId});
+    dialog.append(element('h2', {id: titleId}, title), element('p', {}, body));
+    const actions = element('div', {className: 'dialog-actions'});
+    const cancel = element('button', {type: 'button', className: 'button button-quiet'}, 'Cancel');
+    const confirm = element(
+        'button',
+        {type: 'button', className: `button ${danger ? 'button-danger' : 'button-primary'}`},
+        confirmLabel);
+    actions.append(cancel, confirm);
+    dialog.append(actions);
+    document.body.append(dialog);
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      dialog.close();
+      dialog.remove();
+      if (trigger instanceof HTMLElement) trigger.focus();
+      resolve(result);
+    };
+    cancel.addEventListener('click', () => finish(false));
+    confirm.addEventListener('click', () => finish(true));
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      finish(false);
+    });
+    dialog.showModal();
+    cancel.focus();
+  });
+}
+
+export function showFieldErrors(form, fieldErrors, labels = {}) {
+  if (!fieldErrors || typeof fieldErrors !== 'object') return null;
+  let firstInvalid = null;
+  for (const [name, rawMessages] of Object.entries(fieldErrors)) {
+    const input = form.elements.namedItem(name);
+    if (!(input instanceof HTMLElement)) continue;
+    const wrapper = input.closest('.field');
+    if (!wrapper) continue;
+    const id = `field-${name}-error`;
+    let error = wrapper.querySelector(`#${CSS.escape(id)}`);
+    if (!error) {
+      error = element('p', {className: 'field-error', id});
+      wrapper.append(error);
+    }
+    const messages = Array.isArray(rawMessages) ? rawMessages : [rawMessages];
+    const text = messages.map((raw) => {
+      const value = typeof raw === 'string' ? raw : raw?.message;
+      if (typeof value !== 'string') return '';
+      return value.replace(/^must not be blank$/i, 'is required')
+          .replace(/^size must be between (.+) and (.+)$/i, 'must be between $1 and $2 characters');
+    }).filter(Boolean).join(' ');
+    error.textContent = text || 'Please check this value.';
+    error.hidden = false;
+    input.setAttribute('aria-invalid', 'true');
+    const describedBy = new Set((input.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean));
+    describedBy.add(id);
+    input.setAttribute('aria-describedby', [...describedBy].join(' '));
+    firstInvalid ||= input;
+  }
+  firstInvalid?.focus();
+  return firstInvalid;
+}
 export function addField(form, labelText, name, type, attributes = {}) {
-  const {required = true, ...inputAttributes} = attributes;
+  const {required = true, hint, ...inputAttributes} = attributes;
   const wrapper = element('div', {className: 'field'});
   const id = `field-${name}`;
-  wrapper.append(element('label', {for: id}, labelText));
+  const label = labelText.replace(/\s*\((required|optional)\)\s*$/i, '');
+  wrapper.append(element(
+      'label', {for: id}, `${label} (${required === false ? 'optional' : 'required'})`));
   const input = element('input', {id, name, type, ...inputAttributes});
   if (required !== false) input.required = true;
-  wrapper.append(input);
+  if (hint) {
+    const hintId = `field-${name}-hint`;
+    input.setAttribute('aria-describedby', hintId);
+    wrapper.append(input, element('small', {id: hintId}, hint));
+  } else {
+    wrapper.append(input);
+  }
   form.append(wrapper);
   return input;
 }
@@ -62,7 +150,7 @@ export function appendFieldErrors(container, form, fieldErrors) {
 }
 
 export function formatDate(value) {
-  if (!value) return '—';
+  if (!value) return 'Not provided';
   const date = new Date(`${value}T00:00:00`);
   return Number.isNaN(date.getTime()) ?
       value :
@@ -70,7 +158,7 @@ export function formatDate(value) {
 }
 
 export function formatDateTime(value) {
-  if (!value) return '—';
+  if (!value) return 'Not provided';
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ?
       value :
@@ -79,11 +167,44 @@ export function formatDateTime(value) {
           .format(date);
 }
 
-export function addSelect(form, labelText, name, choices, selected) {
+export function formatMoney(currency, amount) {
+  try {
+    return new Intl.NumberFormat(undefined, {style: 'currency', currency})
+        .format(Number(amount));
+  } catch {
+    return `${currency} ${amount}`;
+  }
+}
+
+export function describeExpiry(daysRemaining, expiresOn) {
+  const date = expiresOn ? formatExpiryDate(expiresOn) : '';
+  if (daysRemaining === 0) return 'Expires today';
+  if (daysRemaining > 0) {
+    const unit = daysRemaining === 1 ? 'day' : 'days';
+    return `Expires in ${daysRemaining} ${unit}${date ? ` (${date})` : ''}`;
+  }
+  const elapsed = Math.abs(daysRemaining);
+  const unit = elapsed === 1 ? 'day' : 'days';
+  return `Expired ${elapsed} ${unit} ago${date ? ` (${date})` : ''}`;
+}
+
+function formatExpiryDate(value) {
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? '' :
+      new Intl.DateTimeFormat(undefined, {
+        day: 'numeric', month: 'short', year: 'numeric'
+      }).format(date);
+}
+
+export function addSelect(
+    form, labelText, name, choices, selected, {required = true} = {}) {
   const wrapper = element('div', {className: 'field'});
   const id = `field-${name}`;
-  wrapper.append(element('label', {for: id}, labelText));
-  const select = element('select', {id, name, required: ''});
+  const label = labelText.replace(/\s*\((required|optional)\)\s*$/i, '');
+  wrapper.append(element(
+      'label', {for: id}, `${label} (${required ? 'required' : 'optional'})`));
+  const select = element('select', {id, name});
+  if (required) select.required = true;
   for (const [value, label] of choices) {
     const option = element('option', {value}, label);
     if (value === selected) option.selected = true;
@@ -95,13 +216,34 @@ export function addSelect(form, labelText, name, choices, selected) {
 }
 
 export function addTextarea(form, labelText, name, attributes = {}) {
+  const {required = false, ...textareaAttributes} = attributes;
   const wrapper = element('div', {className: 'field'});
   const id = `field-${name}`;
-  wrapper.append(element('label', {for: id}, labelText));
-  const input = element('textarea', {id, name, ...attributes});
+  const label = labelText.replace(/\s*\((required|optional)\)\s*$/i, '');
+  wrapper.append(element(
+      'label', {for: id}, `${label} (${required ? 'required' : 'optional'})`));
+  const input = element('textarea', {id, name, ...textareaAttributes});
+  if (required) input.required = true;
   wrapper.append(input);
   form.append(wrapper);
   return input;
+}
+
+export function addPasswordToggle(input) {
+  const button = element(
+      'button',
+      {type: 'button', className: 'password-toggle text-button'},
+      'Show password');
+  button.setAttribute('aria-controls', input.id);
+  button.setAttribute('aria-pressed', 'false');
+  button.addEventListener('click', () => {
+    const showing = input.type === 'password';
+    input.type = showing ? 'text' : 'password';
+    button.textContent = showing ? 'Hide password' : 'Show password';
+    button.setAttribute('aria-pressed', String(showing));
+  });
+  input.after(button);
+  return button;
 }
 
 export function errorBox(error, retry) {

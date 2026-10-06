@@ -8,6 +8,7 @@ import com.warrantyvault.member.SpaceMember;
 import com.warrantyvault.product.Product;
 import com.warrantyvault.product.ProductRepository;
 import com.warrantyvault.product.CurrencyValueTotal;
+import com.warrantyvault.product.DashboardCounts;
 import com.warrantyvault.config.AppProperties;
 import com.warrantyvault.space.Space;
 import com.warrantyvault.user.User;
@@ -35,7 +36,15 @@ class DashboardServiceTest {
         Product current = product("active", space, LocalDate.parse("2026-10-02"), "5000.00");
         Product expired = product("expired", space, LocalDate.parse("2026-09-30"), "9000.00");
         ProductRepository products = mock(ProductRepository.class);
-        when(products.findAllForDashboard(user.getId())).thenReturn(List.of(current, expired));
+        when(products.findDashboardCounts(user.getId(), LocalDate.parse("2026-10-01"), LocalDate.parse("2026-10-31")))
+            .thenReturn(new DashboardCounts(0L, 1L, 1L));
+        when(products.findUpcomingForDashboard(org.mockito.ArgumentMatchers.eq(user.getId()),
+            org.mockito.ArgumentMatchers.eq(LocalDate.parse("2026-10-01")), org.mockito.ArgumentMatchers.any()))
+            .thenReturn(List.of(current));
+        when(products.findRecentlyExpiredForDashboard(org.mockito.ArgumentMatchers.eq(user.getId()),
+            org.mockito.ArgumentMatchers.eq(LocalDate.parse("2026-07-03")),
+            org.mockito.ArgumentMatchers.eq(LocalDate.parse("2026-09-30")),
+            org.mockito.ArgumentMatchers.any())).thenReturn(List.of(expired));
         when(products.findCoveredValueTotals(user.getId(), LocalDate.parse("2026-10-01")))
             .thenReturn(List.of(new CurrencyValueTotal("INR", new BigDecimal("5000.00"))));
         DashboardService service = new DashboardService(products, new AppProperties(),

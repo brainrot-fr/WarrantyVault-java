@@ -7,11 +7,13 @@ import {
 } from '../ui.js';
 
 export async function renderInvitations(runtime) {
-  const main = element('main', {className: 'page-content'});
+  runtime.setPageTitle('Invitations');
+  const main = element('main', {className: 'page-content', 'aria-busy': 'true'});
   main.append(element('p', {role: 'status'}, 'Loading invitations…'));
   runtime.renderShell(main, true);
   try {
     const invitations = await apiJson('/api/invitations');
+    main.removeAttribute('aria-busy');
     main.replaceChildren(element('div', {className: 'page-heading'}, [
       element('p', {className: 'eyebrow'}, 'Shared with you'),
       element('h1', {}, 'Invitations')
@@ -29,6 +31,22 @@ export async function renderInvitations(runtime) {
                 formatDateTime(invitation.expiresAt)}`)
       ]));
       const actions = element('span', {className: 'member-actions'});
+      const codeField = element('div', {className: 'field'});
+      const codeInput = element('input', {
+        id: `invite-code-${invitation.id}`,
+        name: 'code',
+        type: 'text',
+        required: '',
+        placeholder: 'Enter the invite code'
+      });
+      const codeLabel =
+          element('label', {for: codeInput.id}, 'Invite code (required)');
+      const codeError = element('p', {
+        className: 'field-error', id: `${codeInput.id}-error`, hidden: true
+      });
+      codeInput.setAttribute('aria-describedby', codeError.id);
+      codeField.append(codeLabel, codeInput, codeError);
+      row.append(codeField);
       for (const action of ['decline', 'accept']) {
         const button = element(
             'button', {
@@ -38,22 +56,43 @@ export async function renderInvitations(runtime) {
             },
             action === 'accept' ? 'Accept' : 'Decline');
         button.addEventListener('click', async () => {
+          if (action === 'accept' && !codeInput.value.trim()) return;
           button.disabled = true;
           try {
             const accepted = await apiJson(
                 `/api/invitations/${encodeURIComponent(invitation.id)}/${
                     action}`,
-                {method: 'POST', body: '{}'});
+                {
+                  method: 'POST',
+                  body: action === 'accept' ?
+                      JSON.stringify({code: codeInput.value.trim()}) : '{}'
+                });
+            await runtime.refreshInvitations(true);
             if (action === 'accept')
               runtime.navigate(`/spaces/${encodeURIComponent(accepted.id)}`);
             else
               await renderInvitations(runtime);
           } catch (error) {
-            showMessage(feedback, error.message);
+            if (action === 'accept' && error.code === 'INVALID_INVITE_CODE') {
+              codeError.textContent = error.message;
+              codeError.hidden = false;
+              codeInput.setAttribute('aria-invalid', 'true');
+              codeInput.focus();
+            } else {
+              showMessage(feedback, error.message);
+            }
             button.disabled = false;
           }
         });
         actions.append(button);
+        if (action === 'accept') {
+          button.disabled = true;
+          codeInput.addEventListener('input', () => {
+            button.disabled = codeInput.value.trim().length === 0;
+            codeError.hidden = true;
+            codeInput.removeAttribute('aria-invalid');
+          });
+        }
       }
       row.append(actions);
       list.append(row);
@@ -63,6 +102,7 @@ export async function renderInvitations(runtime) {
           'p', {className: 'empty-note'}, 'You have no pending invitations.'));
     main.append(feedback, list);
   } catch (error) {
+    main.removeAttribute('aria-busy');
     main.replaceChildren(errorBox(error, () => renderInvitations(runtime)));
   }
 }

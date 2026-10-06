@@ -21,11 +21,16 @@ import java.util.HashMap;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class SpaceService {
+    private static final Logger logger = LoggerFactory.getLogger(SpaceService.class);
     private final SpaceRepository spaceRepository;
     private final UserRepository userRepository;
     private final SpaceMemberRepository spaceMemberRepository;
@@ -49,7 +54,7 @@ public class SpaceService {
     @Transactional
     public Space createSpace(String ownerId, String name, String description) {
         User owner = userRepository.findById(ownerId).orElseThrow(() -> new ApiException("NOT_FOUND", "User not found", 404));
-        if (spaceRepository.existsByOwnerAndName(owner, name.trim())) {
+        if (spaceRepository.existsByOwnerAndNameIgnoreCase(owner, name.trim())) {
             throw new ApiException("SPACE_EXISTS", "Space already exists", 409);
         }
         Space space = new Space();
@@ -59,7 +64,12 @@ public class SpaceService {
         space.setDescription(description);
         space.setCreatedAt(Instant.now(clock));
         space.setUpdatedAt(Instant.now(clock));
-        Space saved = spaceRepository.save(space);
+        Space saved;
+        try {
+            saved = spaceRepository.saveAndFlush(space);
+        } catch (DataIntegrityViolationException exception) {
+            throw new ApiException("SPACE_EXISTS", "Space already exists", 409);
+        }
 
         SpaceMember member = new SpaceMember();
         member.setSpace(saved);
@@ -68,11 +78,6 @@ public class SpaceService {
         member.setAddedAt(Instant.now(clock));
         spaceMemberRepository.save(member);
         return saved;
-    }
-
-    @Transactional(readOnly = true)
-    public List<Space> listSpacesForUser(String userId) {
-        return spaceRepository.findByUserId(userId);
     }
 
     @Transactional(readOnly = true)
@@ -119,17 +124,17 @@ public class SpaceService {
         Space space = membership.getSpace();
         String nextName = name == null ? space.getName() : name.trim();
         if (nextName.isBlank() || nextName.length() > 80) throw new ApiException("VALIDATION_FAILED", "Space name must be between 1 and 80 characters", 400);
-        if (!nextName.equals(space.getName()) && spaceRepository.existsByOwnerAndName(space.getOwner(), nextName)) {
+        if (!nextName.equalsIgnoreCase(space.getName())
+            && spaceRepository.existsByOwnerAndNameIgnoreCase(space.getOwner(), nextName)) {
             throw new ApiException("SPACE_EXISTS", "A Space with this name already exists", 409);
         }
         space.setName(nextName);
-        if (description != null) space.setDescription(description);
+        if (description != null) {
+            String trimmed = description.trim();
+            space.setDescription(trimmed.isEmpty() ? null : trimmed);
+        }
         space.setUpdatedAt(Instant.now(clock));
         return spaceRepository.save(space);
-    }
-
-    public Space getSpace(String spaceId, String userId) {
-        return requireMembership(spaceId, userId).getSpace();
     }
 
     @Transactional
@@ -148,16 +153,20 @@ public class SpaceService {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    storedKeys.forEach(storageService::delete);
+                    for (String key : storedKeys) {
+                        try {
+                            storageService.delete(key);
+                        } catch (RuntimeException exception) {
+                            logger.warn("Could not remove deleted Space upload {}", key);
+                        }
+                    }
                 }
             });
         }
     }
 
     private SpaceMember requireMembership(String spaceId, String userId) {
-        Space space = spaceRepository.findById(spaceId).orElseThrow(() -> new ApiException("NOT_FOUND", "Space not found", 404));
-        User user = userRepository.findById(userId).orElseThrow(() -> new ApiException("NOT_FOUND", "User not found", 404));
-        return spaceMemberRepository.findBySpaceAndUser(space, user)
+        return spaceMemberRepository.findBySpaceIdAndUserId(spaceId, userId)
             .orElseThrow(() -> new ApiException("NOT_FOUND", "Space not found", 404));
     }
 
@@ -166,27 +175,24 @@ public class SpaceService {
         SpaceRole role = spaceMemberRepository.findBySpaceAndUser(space, viewer)
             .orElseThrow(() -> new ApiException("NOT_FOUND", "Space not found", 404)).getRole();
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(viewer.getTimezone())));
-        List<Product> products = productRepository.findBySpace(space);
-        long expiringSoon = products.stream().filter(product -> {
-            long days = java.time.temporal.ChronoUnit.DAYS.between(today, product.getExpiresOn());
-            return days >= 0 && days <= appProperties.getExpiringSoonDays();
-        }).count();
-        long expired = products.stream().filter(product -> product.getExpiresOn().isBefore(today)).count();
-        SpaceResponse.NextExpiry next = products.stream()
-            .filter(product -> !product.getExpiresOn().isBefore(today))
-            .min(java.util.Comparator.comparing(Product::getExpiresOn))
-            .map(product -> new SpaceResponse.NextExpiry(product.getId(), product.getProductType() + " " + product.getBrand(), product.getExpiresOn()))
-            .orElse(null);
+        SpaceProductAggregate aggregate = productRepository.findSpaceProductAggregate(
+            space.getId(), today, today.plusDays(appProperties.getExpiringSoonDays()));
+        SpaceNextExpiry nextProduct = productRepository.findNextExpiryForSpace(
+            space.getId(), today, PageRequest.of(0, 1)).stream().findFirst().orElse(null);
+        SpaceResponse.NextExpiry next = nextProduct == null ? null :
+            new SpaceResponse.NextExpiry(
+                nextProduct.productId(), nextProduct.productType() + " " + nextProduct.brand(),
+                nextProduct.expiresOn());
         return new SpaceResponse(
             space.getId(),
             space.getName(),
             space.getDescription(),
             role,
             spaceMemberRepository.countBySpace(space),
-            products.size(),
+            aggregate.productCount(),
             next,
-            expiringSoon,
-            expired,
+            aggregate.expiringSoonCount(),
+            aggregate.expiredCount(),
             space.getCreatedAt(),
             space.getUpdatedAt(),
             new SpaceResponse.Permissions(SpacePermissions.canDeleteSpace(role), SpacePermissions.canDeleteSpace(role),

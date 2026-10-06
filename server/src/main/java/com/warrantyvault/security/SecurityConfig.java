@@ -44,8 +44,12 @@ public class SecurityConfig {
                 .requestMatchers("/api/**").authenticated()
                 .anyRequest().permitAll())
             .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
-                .addFilterAfter(new RateLimitFilter(), JwtAuthenticationFilter.class)
-            .headers(headers -> headers.addHeaderWriter(new StaticHeadersWriter("Referrer-Policy", "no-referrer")))
+                .addFilterAfter(new RateLimitFilter(appProperties), JwtAuthenticationFilter.class)
+            .headers(headers -> headers
+                .contentSecurityPolicy(csp -> csp.policyDirectives(
+                    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"))
+                .addHeaderWriter(new StaticHeadersWriter("Permissions-Policy", "camera=(), microphone=(), geolocation=()"))
+                .addHeaderWriter(new StaticHeadersWriter("Referrer-Policy", "no-referrer")))
             .exceptionHandling(e -> e.authenticationEntryPoint((req, res, ex) -> {
                 res.setStatus(401);
                 res.setContentType("application/problem+json");

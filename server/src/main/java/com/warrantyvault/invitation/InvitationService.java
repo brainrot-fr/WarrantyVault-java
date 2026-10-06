@@ -15,11 +15,18 @@ import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
+import java.security.MessageDigest;
+import java.security.SecureRandom;
+import java.nio.charset.StandardCharsets;
+import java.util.HexFormat;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class InvitationService {
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final char[] INVITE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789".toCharArray();
     private final InvitationRepository invitationRepository;
     private final SpaceMemberRepository spaceMemberRepository;
     private final SpaceRepository spaceRepository;
@@ -42,6 +49,7 @@ public class InvitationService {
     public InvitationView createInvitation(String spaceId, String email, SpaceRole role) {
         User inviter = currentUser.get();
         Space space = requireOwner(spaceId, inviter);
+        space = spaceRepository.findByIdForUpdate(spaceId).orElseThrow(this::notFound);
         if (role == null || role == SpaceRole.OWNER) {
             throw new ApiException("VALIDATION_FAILED", "Invitations must use EDITOR or VIEWER role", 400);
         }
@@ -64,15 +72,20 @@ public class InvitationService {
         invitation.setStatus("PENDING");
         invitation.setCreatedAt(now);
         invitation.setExpiresAt(now.plusSeconds(14L * 24 * 60 * 60));
+        String inviteCode = generateInviteCode();
+        invitation.setTokenHash(sha256(inviteCode));
         Invitation saved = invitationRepository.save(invitation);
-        return InvitationView.from(saved);
+        return InvitationView.from(saved, inviteCode);
     }
 
     @Transactional(readOnly = true)
     public MemberListing members(String spaceId) {
         User viewer = currentUser.get();
         Space space = requireMemberSpace(spaceId, viewer);
-        List<MemberView> members = spaceMemberRepository.findBySpace(space).stream().map(MemberView::from).toList();
+        boolean owner = spaceMemberRepository.findBySpaceAndUser(space, viewer)
+            .map(member -> SpacePermissions.canManageMembers(member.getRole())).orElse(false);
+        List<MemberView> members = spaceMemberRepository.findMembersWithUserBySpace(space).stream()
+            .map(member -> MemberView.from(member, owner, viewer.getId())).toList();
         List<InvitationView> invitations = spaceMemberRepository.findBySpaceAndUser(space, viewer)
             .filter(member -> SpacePermissions.canManageMembers(member.getRole()))
             .map(member -> invitationRepository.findBySpaceAndStatus(space, "PENDING"))
@@ -132,20 +145,31 @@ public class InvitationService {
             .map(InviteForUser::from).toList();
     }
 
-    @Transactional
-    public AcceptedSpace acceptInvitation(String invitationId) {
+    @Transactional(noRollbackFor = ApiException.class)
+    public AcceptedSpace acceptInvitation(String invitationId, String code) {
         User user = currentUser.get();
         Invitation invitation = invitationRepository.findById(invitationId).orElseThrow(this::notFound);
         requireInvitee(invitation, user);
         Instant now = Instant.now(clock);
         if (!"PENDING".equals(invitation.getStatus())) throw notFound();
         if (!invitation.getExpiresAt().isAfter(now)) {
-            invitation.setStatus("REVOKED");
+            invitation.setStatus("EXPIRED");
             invitation.setRespondedAt(now);
             throw new ApiException("INVITE_EXPIRED", "This invitation has expired", 409);
         }
         if (spaceMemberRepository.findBySpaceAndUser(invitation.getSpace(), user).isPresent()) {
             throw new ApiException("ALREADY_MEMBER", "You are already a member of this Space", 409);
+        }
+        if (invitation.getTokenHash() == null) {
+            invitation.setStatus("EXPIRED");
+            invitation.setRespondedAt(now);
+            throw new ApiException(
+                "INVALID_INVITE_CODE",
+                "This invitation does not have a valid code. Ask the owner to send a new invitation.",
+                HttpStatus.BAD_REQUEST.value());
+        }
+        if (!matchesCode(invitation.getTokenHash(), code)) {
+            throw new ApiException("INVALID_INVITE_CODE", "That code does not match this invitation.", HttpStatus.BAD_REQUEST.value());
         }
         SpaceMember member = new SpaceMember();
         member.setSpace(invitation.getSpace());
@@ -192,11 +216,37 @@ public class InvitationService {
 
     private ApiException notFound() { return new ApiException("NOT_FOUND", "Resource not found", 404); }
 
+    private String generateInviteCode() {
+        char[] code = new char[12];
+        for (int index = 0; index < code.length; index++) code[index] = INVITE_ALPHABET[SECURE_RANDOM.nextInt(INVITE_ALPHABET.length)];
+        return new String(code);
+    }
+
+    private String sha256(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256").digest(value.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("SHA-256 is unavailable", exception);
+        }
+    }
+
+    private boolean matchesCode(String expectedHash, String code) {
+        if (code == null || code.isBlank()) return false;
+        byte[] expected = expectedHash.getBytes(StandardCharsets.US_ASCII);
+        byte[] supplied = sha256(code.trim().toUpperCase(Locale.ROOT)).getBytes(StandardCharsets.US_ASCII);
+        return MessageDigest.isEqual(expected, supplied);
+    }
+
     public record MemberListing(List<MemberView> members, List<InvitationView> invitations) {}
     public record AcceptedSpace(String id, String name, String description) {}
-    public record MemberView(String userId, String name, String email, SpaceRole role, Instant addedAt) {
-        static MemberView from(SpaceMember member) {
-            return new MemberView(member.getUser().getId(), member.getUser().getName(), member.getUser().getEmail(), member.getRole(), member.getAddedAt());
+    public record MemberView(String userId, String name, String email, SpaceRole role, Instant addedAt,
+                             boolean isCurrentUser) {
+        static MemberView from(SpaceMember member, boolean owner, String currentUserId) {
+            User user = member.getUser();
+            return new MemberView(owner ? user.getId() : null, user.getName(),
+                owner ? user.getEmail() : null, member.getRole(), member.getAddedAt(),
+                currentUserId.equals(user.getId()));
         }
     }
     public static final class InvitationView {
@@ -206,20 +256,26 @@ public class InvitationService {
         private final String status;
         private final Instant createdAt;
         private final Instant expiresAt;
+        private final String inviteCode;
 
         private InvitationView(String id, String email, SpaceRole role, String status, Instant createdAt,
-                               Instant expiresAt) {
+                               Instant expiresAt, String inviteCode) {
             this.id = id;
             this.email = email;
             this.role = role;
             this.status = status;
             this.createdAt = createdAt;
             this.expiresAt = expiresAt;
+            this.inviteCode = inviteCode;
         }
 
         static InvitationView from(Invitation invitation) {
+            return from(invitation, null);
+        }
+
+        static InvitationView from(Invitation invitation, String inviteCode) {
             return new InvitationView(invitation.getId(), invitation.getInvitedEmail(), invitation.getRole(),
-                invitation.getStatus(), invitation.getCreatedAt(), invitation.getExpiresAt());
+                invitation.getStatus(), invitation.getCreatedAt(), invitation.getExpiresAt(), inviteCode);
         }
 
         public String getId() { return id; }
@@ -228,6 +284,7 @@ public class InvitationService {
         public String getStatus() { return status; }
         public Instant getCreatedAt() { return createdAt; }
         public Instant getExpiresAt() { return expiresAt; }
+        public String getInviteCode() { return inviteCode; }
     }
     public record InviteForUser(String id, String spaceName, String invitedByName, SpaceRole role, Instant createdAt, Instant expiresAt) {
         static InviteForUser from(Invitation invitation) {

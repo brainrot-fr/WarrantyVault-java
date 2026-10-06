@@ -12,10 +12,12 @@ import com.warrantyvault.space.SpaceRepository;
 import com.warrantyvault.space.SpaceRole;
 import com.warrantyvault.space.SpacePermissions;
 import com.warrantyvault.storage.StorageService;
+import com.warrantyvault.storage.ImageSniffer;
 import com.warrantyvault.config.AppProperties;
 import com.warrantyvault.user.User;
 import com.warrantyvault.user.UserRepository;
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
@@ -34,9 +36,16 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 @Service
 public class ProductService {
+    private static final Logger logger = LoggerFactory.getLogger(ProductService.class);
     private final ProductRepository productRepository;
     private final SpaceRepository spaceRepository;
     private final UserRepository userRepository;
@@ -57,12 +66,6 @@ public class ProductService {
         this.clock = clock;
     }
 
-    @Transactional(readOnly = true)
-    public List<Product> listProducts(String spaceId, String userId) {
-        SpaceMember membership = requireMembership(spaceId, userId);
-        return productRepository.findBySpaceIdWithResponseDetails(membership.getSpace().getId());
-    }
-
     @Transactional
     public Product createProduct(String spaceId, String userId, ProductCreateRequest request, MultipartFile bill, MultipartFile warrantyCard) {
         User user = userRepository.findById(userId).orElseThrow();
@@ -70,13 +73,15 @@ public class ProductService {
         if (!SpacePermissions.canCreateProduct(membership.getRole())) {
             throw new ApiException("FORBIDDEN", "You cannot add products to this Space", 403);
         }
-        String billContentType = validateImage(bill, true);
-        StorageService.StoredFile stored = storageService.store(bill, membership.getSpace().getId());
+        ValidatedImage billImage = validateImage(bill, true);
+        ValidatedImage cardImage = validateImage(warrantyCard, false);
+        ensureStorageQuota(membership.getSpace().getId(), 0, billImage.bytes().length
+            + (cardImage == null ? 0 : cardImage.bytes().length));
+        StorageService.StoredFile stored = storageService.store(billImage.bytes(), membership.getSpace().getId());
         registerRollbackCleanup(List.of(stored.key()));
-        String cardContentType = validateImage(warrantyCard, false);
         StorageService.StoredFile storedCard = null;
         if (warrantyCard != null && !warrantyCard.isEmpty()) {
-            storedCard = storageService.store(warrantyCard, membership.getSpace().getId());
+            storedCard = storageService.store(cardImage.bytes(), membership.getSpace().getId());
             registerRollbackCleanup(List.of(storedCard.key()));
         }
         Product product = new Product();
@@ -87,18 +92,18 @@ public class ProductService {
         product.setBrand(request.brand());
         product.setModelName(request.modelName());
         product.setSerialNumber(request.serialNumber());
-        product.setPurchasedOn(parseDate(request.purchasedOn()));
+        product.setPurchasedOn(parseDate(request.purchasedOn(), user));
         product.setWarrantyMonths(request.warrantyMonths());
-        product.setPurchasePrice(new BigDecimal(request.purchasePrice()));
-        product.setCurrency(request.currency() == null ? "INR" : request.currency().toUpperCase(Locale.ROOT));
+        product.setPurchasePrice(new BigDecimal(request.purchasePrice()).setScale(2, RoundingMode.HALF_UP));
+        product.setCurrency(currency(request.currency(), user.getCurrency()));
         product.setNotes(request.notes());
         LocalDate expiresOn = product.getPurchasedOn().plusMonths(product.getWarrantyMonths());
         product.setExpiresOn(expiresOn);
         product.setBillKey(stored.key());
-        product.setBillContentType(billContentType);
+        product.setBillContentType(billImage.contentType());
         product.setBillSizeBytes(stored.sizeBytes());
         product.setCardKey(storedCard == null ? null : storedCard.key());
-        product.setCardContentType(cardContentType);
+        product.setCardContentType(cardImage == null ? null : cardImage.contentType());
         product.setCardSizeBytes(storedCard == null ? null : storedCard.sizeBytes());
         product.setCreatedAt(Instant.now(clock));
         product.setUpdatedAt(Instant.now(clock));
@@ -114,26 +119,39 @@ public class ProductService {
         if (!SpacePermissions.canEditProduct(membership.getRole())) {
             throw new ApiException("FORBIDDEN", "You cannot edit products in this Space", 403);
         }
+        if (request.version() != null && request.version() != product.getVersion()) {
+            throw new ApiException("CONCURRENT_UPDATE", "This record changed while you were editing it. Reload and try again.", 409);
+        }
         if (request.removeWarrantyCard() && warrantyCard != null && !warrantyCard.isEmpty()) {
             throw new ApiException("VALIDATION_FAILED", "A replacement card and card removal cannot be requested together", 400);
         }
+        ValidatedImage replacementBill = bill != null && !bill.isEmpty() ? validateImage(bill, false) : null;
+        ValidatedImage replacementCard = warrantyCard != null && !warrantyCard.isEmpty()
+            ? validateImage(warrantyCard, false) : null;
+        long replacingBytes = replacementBill == null ? 0 : product.getBillSizeBytes();
+        long addedBytes = replacementBill == null ? 0 : replacementBill.bytes().length;
+        if (replacementCard != null) {
+            replacingBytes += product.getCardSizeBytes() == null ? 0 : product.getCardSizeBytes();
+            addedBytes += replacementCard.bytes().length;
+        } else if (request.removeWarrantyCard() && product.getCardSizeBytes() != null) {
+            replacingBytes += product.getCardSizeBytes();
+        }
+        ensureStorageQuota(membership.getSpace().getId(), replacingBytes, addedBytes);
         List<String> replacedKeys = new ArrayList<>();
-        if (bill != null && !bill.isEmpty()) {
-            String detectedType = validateImage(bill, false);
-            StorageService.StoredFile stored = storageService.store(bill, membership.getSpace().getId());
+        if (replacementBill != null) {
+            StorageService.StoredFile stored = storageService.store(replacementBill.bytes(), membership.getSpace().getId());
             registerRollbackCleanup(List.of(stored.key()));
             replacedKeys.add(product.getBillKey());
             product.setBillKey(stored.key());
-            product.setBillContentType(detectedType);
+            product.setBillContentType(replacementBill.contentType());
             product.setBillSizeBytes(stored.sizeBytes());
         }
-        if (warrantyCard != null && !warrantyCard.isEmpty()) {
-            String detectedType = validateImage(warrantyCard, false);
-            StorageService.StoredFile stored = storageService.store(warrantyCard, membership.getSpace().getId());
+        if (replacementCard != null) {
+            StorageService.StoredFile stored = storageService.store(replacementCard.bytes(), membership.getSpace().getId());
             registerRollbackCleanup(List.of(stored.key()));
             if (product.getCardKey() != null) replacedKeys.add(product.getCardKey());
             product.setCardKey(stored.key());
-            product.setCardContentType(detectedType);
+            product.setCardContentType(replacementCard.contentType());
             product.setCardSizeBytes(stored.sizeBytes());
         } else if (request.removeWarrantyCard() && product.getCardKey() != null) {
             replacedKeys.add(product.getCardKey());
@@ -146,11 +164,11 @@ public class ProductService {
         product.setBrand(data.brand());
         product.setModelName(data.modelName());
         product.setSerialNumber(data.serialNumber());
-        product.setPurchasedOn(parseDate(data.purchasedOn()));
+        product.setPurchasedOn(parseDate(data.purchasedOn(), membership.getUser()));
         product.setWarrantyMonths(data.warrantyMonths());
         product.setExpiresOn(product.getPurchasedOn().plusMonths(product.getWarrantyMonths()));
-        product.setPurchasePrice(new BigDecimal(data.purchasePrice()));
-        product.setCurrency(data.currency() == null ? "INR" : data.currency().toUpperCase(Locale.ROOT));
+        product.setPurchasePrice(new BigDecimal(data.purchasePrice()).setScale(2, RoundingMode.HALF_UP));
+        product.setCurrency(currency(data.currency(), product.getCurrency()));
         product.setNotes(data.notes());
         product.setUpdatedAt(Instant.now(clock));
         Product saved = productRepository.save(product);
@@ -178,6 +196,12 @@ public class ProductService {
     public ProductPage listProductResponses(String spaceId, String userId, String query, String status, String type,
                                             String sort, int page, int size) {
         if (page < 0 || size < 1 || size > 100) throw new ApiException("VALIDATION_FAILED", "Page must be nonnegative and size must be between 1 and 100", 400);
+        if (query != null && query.length() > 120) {
+            throw new ApiException("VALIDATION_FAILED", "Search text must be no longer than 120 characters", 400);
+        }
+        if (type != null && type.length() > 60) {
+            throw new ApiException("VALIDATION_FAILED", "Product type must be no longer than 60 characters", 400);
+        }
         if (status != null && !List.of("ACTIVE", "EXPIRING_SOON", "EXPIRED").contains(status)) {
             throw new ApiException("VALIDATION_FAILED", "Unsupported product status", 400);
         }
@@ -187,21 +211,18 @@ public class ProductService {
         SpaceMember membership = requireMembership(spaceId, userId);
         User user = membership.getUser();
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(user.getTimezone())));
-        List<ProductResponse> items = productRepository.findBySpaceIdWithResponseDetails(spaceId).stream()
+        String sortOrder = sort == null ? "expiry" : sort;
+        Pageable pageable = PageRequest.of(page, size);
+        String trimmedQuery = query == null ? null : query.trim();
+        String escapedQuery = trimmedQuery == null || trimmedQuery.isBlank() ? null
+            : "%" + trimmedQuery.toLowerCase(Locale.ROOT).replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+        Page<Product> result = productRepository.findPageByFilters(spaceId, today,
+            today.plusDays(appProperties.getExpiringSoonDays()), status,
+            type == null || type.isBlank() ? null : type.toLowerCase(Locale.ROOT), escapedQuery, sortOrder, pageable);
+        List<ProductResponse> items = result.getContent().stream()
             .map(product -> ProductResponse.from(product, membership.getRole(), today, appProperties.getExpiringSoonDays()))
-            .filter(product -> status == null || status.equals(product.status()))
-            .filter(product -> type == null || type.isBlank() || product.productType().equalsIgnoreCase(type))
-            .filter(product -> query == null || query.isBlank() || (
-                product.productType() + " " + product.brand() + " " + nullToEmpty(product.modelName()) + " "
-                    + nullToEmpty(product.serialNumber()) + " " + nullToEmpty(product.notes())
-            ).toLowerCase(Locale.ROOT).contains(query.toLowerCase(Locale.ROOT)))
-            .sorted(productComparator(sort))
             .toList();
-        long total = items.size();
-        int start = Math.min(items.size(), page * size);
-        int end = Math.min(items.size(), start + size);
-        int totalPages = (int) Math.ceil(total / (double) size);
-        return new ProductPage(items.subList(start, end), page, size, total, totalPages);
+        return new ProductPage(items, page, size, result.getTotalElements(), result.getTotalPages());
     }
 
     @Transactional
@@ -228,26 +249,14 @@ public class ProductService {
         return new ProductController.ProductFacets(List.copyOf(types), List.copyOf(brands));
     }
 
-    private Comparator<ProductResponse> productComparator(String sort) {
-        if ("purchased".equals(sort)) return Comparator.comparing(ProductResponse::purchasedOn).reversed();
-        if ("name".equals(sort)) return Comparator.comparing(ProductResponse::productType, String.CASE_INSENSITIVE_ORDER)
-            .thenComparing(ProductResponse::brand, String.CASE_INSENSITIVE_ORDER);
-        return Comparator.comparing((ProductResponse item) -> "EXPIRED".equals(item.status()))
-            .thenComparing(ProductResponse::expiresOn);
-    }
-
-    private String nullToEmpty(String value) { return value == null ? "" : value; }
-
     public record ProductPage(List<ProductResponse> items, int page, int size, long totalItems, int totalPages) {}
 
     public SpaceMember requireMembership(String spaceId, String userId) {
-        Space space = spaceRepository.findById(spaceId).orElseThrow(() -> new ApiException("NOT_FOUND", "Space not found", 404));
-        User user = userRepository.findById(userId).orElseThrow(() -> new ApiException("NOT_FOUND", "User not found", 404));
-        return spaceMemberRepository.findBySpaceAndUser(space, user)
+        return spaceMemberRepository.findBySpaceIdAndUserId(spaceId, userId)
             .orElseThrow(() -> new ApiException("NOT_FOUND", "Space not found", 404));
     }
 
-    private String validateImage(MultipartFile file, boolean required) {
+    private ValidatedImage validateImage(MultipartFile file, boolean required) {
         if (file == null || file.isEmpty()) {
             if (required) throw new ApiException("VALIDATION_FAILED", "A bill image is required", 400);
             return null;
@@ -259,26 +268,48 @@ public class ProductService {
             byte[] bytes = file.getBytes();
             String contentType = imageContentType(bytes);
             if (contentType == null) throw new ApiException("UNSUPPORTED_MEDIA", "Only JPEG, PNG, and WebP images are accepted", 415);
-            return contentType;
+            return new ValidatedImage(bytes, contentType);
         } catch (IOException e) {
             throw new ApiException("UPLOAD_READ_FAILED", "The uploaded image could not be read", 400);
         }
     }
 
     static String imageContentType(byte[] bytes) {
-        if (bytes.length >= 3 && (bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xd8 && (bytes[2] & 0xff) == 0xff) return "image/jpeg";
-        if (bytes.length >= 8 && (bytes[0] & 0xff) == 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G'
-            && bytes[4] == 0x0d && bytes[5] == 0x0a && bytes[6] == 0x1a && bytes[7] == 0x0a) return "image/png";
-        if (bytes.length >= 12 && bytes[0] == 'R' && bytes[1] == 'I' && bytes[2] == 'F' && bytes[3] == 'F'
-            && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P') return "image/webp";
-        return null;
+        return ImageSniffer.sniff(bytes).map(ImageSniffer.Format::contentType).orElse(null);
     }
 
-    private LocalDate parseDate(String value) {
+    private record ValidatedImage(byte[] bytes, String contentType) {}
+
+    private void ensureStorageQuota(String spaceId, long replacedBytes, long addedBytes) {
+        long quota = appProperties.getStorage().getMaxBytesPerSpace();
+        if (quota == 0) return;
+        long current = productRepository.sumStoredBytesBySpaceId(spaceId);
+        if (current - replacedBytes + addedBytes > quota) {
+            throw new ApiException("STORAGE_LIMIT", "This Space has reached its storage limit.", 413);
+        }
+    }
+
+    private LocalDate parseDate(String value, User user) {
         try {
-            return LocalDate.parse(value);
+            LocalDate date = LocalDate.parse(value);
+            if (date.isBefore(LocalDate.of(1970, 1, 1))) {
+                throw new ApiException("VALIDATION_FAILED", "Purchase date cannot be before 1970.", 400);
+            }
+            if (date.isAfter(LocalDate.now(clock.withZone(ZoneId.of(user.getTimezone()))))) {
+                throw new ApiException("VALIDATION_FAILED", "Purchase date cannot be in the future.", 400);
+            }
+            return date;
         } catch (java.time.DateTimeException e) {
             throw new ApiException("VALIDATION_FAILED", "Purchased on must be a valid calendar date", 400);
+        }
+    }
+
+    private String currency(String value, String fallback) {
+        String code = value == null ? fallback : value.toUpperCase(Locale.ROOT);
+        try {
+            return java.util.Currency.getInstance(code).getCurrencyCode();
+        } catch (IllegalArgumentException exception) {
+            throw new ApiException("VALIDATION_FAILED", "Unknown currency code.", 400);
         }
     }
 
@@ -286,7 +317,15 @@ public class ProductService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCompletion(int status) {
-                if (status != STATUS_COMMITTED) keys.forEach(storageService::delete);
+                if (status != STATUS_COMMITTED) {
+                    for (String key : keys) {
+                        try {
+                            storageService.delete(key);
+                        } catch (RuntimeException exception) {
+                            logger.warn("Could not remove uncommitted upload {}", key);
+                        }
+                    }
+                }
             }
         });
     }
@@ -295,7 +334,13 @@ public class ProductService {
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                keys.forEach(storageService::delete);
+                for (String key : keys) {
+                    try {
+                        storageService.delete(key);
+                    } catch (RuntimeException exception) {
+                        logger.warn("Could not remove replaced upload {}", key);
+                    }
+                }
             }
         });
     }

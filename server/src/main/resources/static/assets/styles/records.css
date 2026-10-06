@@ -63,12 +63,68 @@
   background: var(--raised);
   box-shadow: var(--surface-shadow);
 }
+.product-form > .form-section {
+  min-width: 0;
+  display: grid;
+  gap: 1rem;
+  margin: 0;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  padding: 1rem;
+}
+.form-section legend {
+  padding: 0 0.35rem;
+  font-family: var(--font-display);
+  font-size: 1.3rem;
+}
+.form-section .field {
+  min-width: 0;
+}
 .product-form {
   margin-top: 1rem;
 }
 .product-form > h2,
 .settings-form > h2 {
   font-size: 1.8rem;
+}
+.coverage-progress {
+  display: grid;
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+.coverage-description {
+  color: var(--ink-muted);
+  font-weight: 600;
+}
+.coverage-progress progress {
+  width: 100%;
+  height: 0.8rem;
+  accent-color: var(--accent);
+}
+.selected-image-preview {
+  display: grid;
+  gap: 0.5rem;
+  margin: 0;
+}
+.selected-image-preview img {
+  display: block;
+  max-width: min(100%, 24rem);
+  max-height: 16rem;
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-control);
+  object-fit: contain;
+}
+.selected-image-preview figcaption {
+  color: var(--ink-muted);
+  font-size: 0.84rem;
+}
+.password-toggle {
+  justify-self: start;
+  text-decoration: underline;
+  text-underline-offset: 0.18em;
+}
+.password-guidance {
+  margin-top: -0.35rem;
 }
 .checkbox-field {
   display: flex;
@@ -142,7 +198,8 @@
   margin: 0;
   text-align: right;
 }
-.app-dialog {
+.app-dialog,
+.confirm-dialog {
   width: min(100% - 2rem, 520px);
   max-height: min(90vh, 800px);
   border: 1px solid var(--hairline);
@@ -152,12 +209,25 @@
   background: var(--raised);
   box-shadow: 0 24px 72px rgba(25, 27, 24, 0.18);
 }
-.app-dialog::backdrop {
+.app-dialog::backdrop,
+.confirm-dialog::backdrop {
   background: rgba(25, 27, 24, 0.42);
 }
 .app-dialog .remove-link {
   justify-self: start;
   margin-top: 1rem;
+}
+.confirm-dialog .dialog-actions {
+  justify-content: flex-end;
+  margin-top: 1.25rem;
+}
+.button-danger {
+  border-color: var(--status-expired);
+  background: var(--status-expired);
+  color: #fff;
+}
+.button-danger:hover:not(:disabled) {
+  background: #713330;
 }
 .dialog-actions {
   margin-top: 0.5rem;

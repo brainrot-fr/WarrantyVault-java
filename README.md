@@ -1,43 +1,96 @@
 # WarrantyVault
 
-## Contents
+WarrantyVault is a local-first warranty tracker. It keeps product details and private document images on the computer running the application.
 
-- [What is WarrantyVault?](#what-is-warrantyvault)
-- [What you can do](#what-you-can-do)
-- [Technology stack](#technology-stack)
-- [Your data and privacy](#your-data-and-privacy)
-- [Using WarrantyVault](#using-warrantyvault)
+## Requirements
 
-## What is WarrantyVault?
+- Java 21
+- MariaDB 10.5 or later, or MySQL 8 or later
+- `make`, or use the included Maven wrapper at `server/mvnw`
+- OpenSSL for the `make secret` helper
 
-WarrantyVault is a private place to keep product details, receipts, and warranty dates together on your computer. It helps you find the information you need when a product needs repair or its coverage is ending.
+The browser interface uses plain HTML, CSS, and JavaScript. It does not need a separate frontend build.
 
-## What you can do
+Hibernate selects the matching MariaDB or MySQL dialect from the JDBC server metadata. Other database types use Hibernate's built-in dialect detection.
 
-- Keep product details, purchase dates, prices, warranty periods, and notes together.
-- Attach receipt and warranty-card images to product records.
-- Find warranties that are active, expiring soon, or expired.
-- Organize records into Spaces, such as for your home or family, and invite other people to share them.
+## Database setup
 
-## Technology stack
+Create a database and a local database user. Replace the password below with the value you will put in `.env`.
 
-- **Application:** Java and Spring Boot.
-- **Web interface:** HTML, CSS, and JavaScript, opened in your browser.
-- **Database:** MySQL-compatible MariaDB or MySQL, stored locally.
-- **Documents:** Uploaded images are stored on the computer running WarrantyVault.
+```sql
+CREATE DATABASE warrantyvault CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'warrantyvault'@'localhost' IDENTIFIED BY 'choose-a-local-password';
+GRANT ALL PRIVILEGES ON warrantyvault.* TO 'warrantyvault'@'localhost';
+```
 
-## Your data and privacy
+Copy `.env.example` to `.env`, then set `MYSQL_USER` and `MYSQL_PASSWORD` to the database user and password. Keep `.env` private. The first run applies database migrations. Back up the database and uploads before upgrading because migrations are not reversible.
 
-WarrantyVault stores product records and uploaded documents locally on the computer where it runs. It is not a cloud-sync service: your information is not automatically available on your other devices. People you invite can access shared records through accounts on the same WarrantyVault installation.
+## Configuration
 
-Keep your account credentials private. If you need to back up your records or move WarrantyVault to another computer, make sure both the database and uploaded documents are included in your backup.
+The `.env` file supports these variables:
 
-## Using WarrantyVault
+- `MYSQL_USER` and `MYSQL_PASSWORD`: database credentials.
+- `APP_JWT_SECRET`: signing key for access tokens. Generate one with `make secret`. WarrantyVault refuses to start if it is missing or weak. The old published key is no longer accepted.
+- `APP_COOKIE_SECURE`: set to `true` when the app is served through HTTPS. It defaults to `false` for local loopback use.
+- `APP_SEED_DEMO_DATA`: defaults to `false`. Set it to `true` only for an empty local demo installation.
+- `APP_DEMO_PASSWORD`: a private, unique password required by `make demo`. It must be 8 to 72 UTF-8 bytes and not be on the common-password list.
 
-1. Open WarrantyVault in your browser.
-2. Choose **Create account** to make your personal account, or sign in if you already have one.
-3. Add products with their purchase dates and warranty details.
-4. Attach receipt or warranty-card images so they are easy to find later.
-5. Create Spaces to organize records, for example by home or family, and invite other people to share a Space.
+Additional application properties can be supplied through Spring environment variables or `application.properties`:
 
-Your dashboard helps you find warranties that are active, expiring soon, or expired. You can update product details and manage shared Space access in the app.
+- `app.storage.local-dir`: upload directory. The default is `./uploads`.
+- `app.max-upload-bytes`: maximum image size in bytes. The default is 10 MB.
+- `app.expiring-soon-days`: expiring-soon window in days. The default is 30.
+- `app.storage.max-bytes-per-space`: optional per-Space quota in bytes. The default is 2147483648. Set it to `0` to disable the quota.
+
+The application listens on `127.0.0.1` by default.
+
+## Run and test
+
+```sh
+cp .env.example .env
+# Edit .env with your database credentials.
+make secret
+make run
+```
+
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080). If WarrantyVault is already responding on port 8080, `make run` reports that instance instead of attempting to start a duplicate. Run the test suite with:
+
+```sh
+make test
+```
+
+`make demo` enables sample data for a local demo. On an empty database it creates `demo@warrantyvault.local` and `family@warrantyvault.local` with the password supplied in `APP_DEMO_PASSWORD`. The seeder runs only when `server.address` is loopback. Do not reuse a real account password for the demo.
+
+## Where your data lives
+
+Product details, accounts, Spaces, invitations, and refresh sessions are stored in the MariaDB or MySQL database. Uploaded images are stored in the configured upload directory. The absolute upload path is printed in the application startup log. Back up both locations together.
+
+## Backup and restore
+
+Stop the application before making a consistent backup. Save a database dump and a copy of the upload directory:
+
+```sh
+mysqldump warrantyvault > backup.sql
+cp -a ./uploads ./uploads-backup
+```
+
+Restore the database and uploads directory together. Restoring only one can leave records with missing images or orphaned files. Back up both before upgrading. Schema migrations are additive but do not include down-migrations. To roll back an upgrade, restore the database and uploads backup, then run the previous application build.
+
+## Sharing a Space
+
+WarrantyVault listens on `127.0.0.1`, so it is available only on the same computer by default. People on other devices cannot connect unless you place the app behind a reverse proxy with HTTPS. For that setup, configure `server.address` for the intended network interface and set `APP_COOKIE_SECURE=true`. Do not expose the app directly to an untrusted network.
+
+Invitations do not send email. The Space owner must give the invitee the invitation code using a separate trusted channel. The code is shown once when the invitation is created.
+
+## Warranty dates
+
+The warranty ends on the calculated expiry date, and coverage includes that date. Adding a month to a date near the end of a month clamps to the final valid day of the target month. For example, a purchase on January 31 with a one-month warranty expires on February 28, or February 29 in a leap year.
+
+## Limits and known gaps
+
+- Images must be JPEG, PNG, or WebP and may be up to 10 MB each.
+- Password reset is not available.
+- Email reminders are not available.
+- Account deletion is not available.
+- Access tokens last 30 minutes. A rotating refresh cookie keeps a session active until it expires or is revoked.
+- If the signing key changes, existing access tokens become invalid. Users can usually continue through their refresh cookie and otherwise need to sign in again.

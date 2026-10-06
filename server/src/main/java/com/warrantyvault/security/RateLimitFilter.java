@@ -1,8 +1,12 @@
 package com.warrantyvault.security;
 
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.warrantyvault.config.AppProperties;
 import jakarta.servlet.ReadListener;
-import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.ServletInputStream;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletRequestWrapper;
 import jakarta.servlet.http.HttpServletResponse;
@@ -16,110 +20,141 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.HexFormat;
+import java.util.Locale;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 
 public class RateLimitFilter extends OncePerRequestFilter {
     private static final int LOGIN_BODY_LIMIT = 8 * 1024;
-    private static final Pattern EMAIL_FIELD = Pattern.compile("\"email\"\\s*:\\s*\"((?:\\\\.|[^\"\\\\])*)\"", Pattern.CASE_INSENSITIVE);
+    private static final long API_BODY_LIMIT = 64 * 1024;
     private static final long CLEANUP_INTERVAL = 256;
+    private static final Pattern INVITATION_ACCEPT_PATH = Pattern.compile("/api/invitations/[^/]+/accept");
+    private static final ObjectMapper LOGIN_MAPPER = new ObjectMapper()
+        .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
+
+    private final AppProperties appProperties;
     private final ConcurrentHashMap<String, TokenBucket> buckets = new ConcurrentHashMap<>();
     private final AtomicLong requests = new AtomicLong();
+
+    public RateLimitFilter(AppProperties appProperties) {
+        this.appProperties = appProperties;
+    }
+
     @Override
-    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, jakarta.servlet.FilterChain chain)
-        throws ServletException, IOException {
-        if ("OPTIONS".equals(request.getMethod()) || !request.getRequestURI().startsWith("/api/")) {
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response,
+                                    jakarta.servlet.FilterChain chain) throws ServletException, IOException {
+        String path = UrlPathHelper.defaultInstance.getPathWithinApplication(request);
+        if ("OPTIONS".equals(request.getMethod()) || !path.startsWith("/api/")) {
             chain.doFilter(request, response);
             return;
         }
 
         if (requests.incrementAndGet() % CLEANUP_INTERVAL == 0) cleanupStaleBuckets();
-        String ip = clientIp(request);
-        if (!allow("api:" + ip, 300, Duration.ofMinutes(1), response)) return;
+        String ip = request.getRemoteAddr();
+        AppProperties.RateLimit limits = appProperties.getRateLimit();
+        if (!allow("api:" + ip, limits.getApiPerMinute(), Duration.ofMinutes(1), response)) return;
+        boolean loginRequest = "POST".equals(request.getMethod()) && "/api/auth/login".equals(path);
+        if (loginRequest
+            && !allow("login-ip:" + ip, limits.getLoginPerIp(), Duration.ofMinutes(15), response)) return;
 
         HttpServletRequest nextRequest = request;
-        String path = request.getRequestURI();
-        if ("POST".equals(request.getMethod()) && "/api/auth/login".equals(path)) {
-            CachedBodyRequest cached;
+        CachedBodyRequest cachedBody = null;
+        if (isWriteMethod(request.getMethod()) && !isMultipart(request)) {
+            long bodyLimit = loginRequest ?
+                LOGIN_BODY_LIMIT : API_BODY_LIMIT;
             try {
-                cached = new CachedBodyRequest(request);
+                cachedBody = new CachedBodyRequest(request, bodyLimit);
             } catch (PayloadTooLargeException exception) {
-                response.setStatus(413);
-                response.setContentType("application/problem+json");
-                response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"PAYLOAD_TOO_LARGE\",\"status\":413,\"detail\":\"Login request is too large\",\"code\":\"PAYLOAD_TOO_LARGE\",\"fieldErrors\":{}}");
+                writeProblem(response, 413, "PAYLOAD_TOO_LARGE",
+                    bodyLimit == LOGIN_BODY_LIMIT ? "Login request is too large" :
+                                                    "Request body must be 64 KB or smaller");
                 return;
             }
-            nextRequest = cached;
-            if (!allow("login-ip:" + ip, 30, Duration.ofMinutes(15), response)) return;
-            String email = extractEmail(cached.body());
-            if (!email.isBlank() && !allow("login:" + ip + ":" + digest(email), 10, Duration.ofMinutes(15), response)) return;
+            nextRequest = cachedBody;
+            if (isJson(request) && cachedBody.body().length > 0) {
+                try {
+                    LOGIN_MAPPER.readTree(cachedBody.body());
+                } catch (IOException exception) {
+                    writeProblem(response, 400, "MALFORMED_JSON",
+                        "Request body is invalid or contains duplicate JSON keys");
+                    return;
+                }
+            }
+        }
+        if (loginRequest) {
+            String email = extractEmail(cachedBody.body());
+            if (!email.isBlank()) {
+                if (!allow("login:" + ip + ":" + digest(email), limits.getLoginPerIpEmail(), Duration.ofMinutes(15), response)) return;
+                if (!allow("login-account:" + digest(email), limits.getLoginPerAccount(), Duration.ofMinutes(15), response)) return;
+            }
         } else if ("POST".equals(request.getMethod()) && "/api/auth/register".equals(path)) {
-            if (!allow("register:" + ip, 5, Duration.ofHours(1), response)) return;
+            if (!allow("register:" + ip, limits.getRegisterPerHour(), Duration.ofHours(1), response)) return;
         } else if ("POST".equals(request.getMethod()) && path.matches("/api/spaces/[^/]+/invitations")) {
             Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
-            if (authentication != null && authentication.isAuthenticated() && authentication.getName() != null) {
-                if (!allow("invitations:" + digest(authentication.getName().toLowerCase()), 30, Duration.ofHours(1), response)) return;
+            if (isAuthenticated(authentication)) {
+                if (!allow("invitations:" + digest(authentication.getName().toLowerCase(Locale.ROOT)),
+                    limits.getInvitationsPerHour(), Duration.ofHours(1), response)) return;
             }
+        } else if ("POST".equals(request.getMethod()) && INVITATION_ACCEPT_PATH.matcher(path).matches()) {
+            Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+            if (isAuthenticated(authentication)
+                && !allow("accept:" + authentication.getName(), limits.getAcceptPerUser(), Duration.ofMinutes(15), response)) return;
         }
         chain.doFilter(nextRequest, response);
     }
 
-    private boolean allow(String key, int baseCapacity, Duration window, HttpServletResponse response) throws IOException {
-        int capacity = baseCapacity * 10;
-        long retryAfter = buckets.computeIfAbsent(key, ignored -> new TokenBucket(capacity, window))
+    private boolean allow(String key, int capacity, Duration window, HttpServletResponse response) throws IOException {
+        long retryAfter = buckets.computeIfAbsent(key, ignored -> new TokenBucket(capacity))
             .tryConsume(capacity, window);
         if (retryAfter == 0) return true;
         response.setStatus(429);
-        response.setContentType("application/problem+json");
+        response.setContentType("application/problem+json;charset=UTF-8");
         response.setHeader("Retry-After", Long.toString(retryAfter));
-        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"RATE_LIMITED\",\"status\":429,\"detail\":\"Too many requests\",\"code\":\"RATE_LIMITED\",\"fieldErrors\":{}}");
+        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"RATE_LIMITED\",\"status\":429,"
+            + "\"detail\":\"Too many requests\",\"code\":\"RATE_LIMITED\",\"fieldErrors\":{}}");
         return false;
     }
 
-    private String clientIp(HttpServletRequest request) {
-        return request.getRemoteAddr();
+    private boolean isAuthenticated(Authentication authentication) {
+        return authentication != null && authentication.isAuthenticated() && authentication.getName() != null;
+    }
+
+    private boolean isWriteMethod(String method) {
+        return "POST".equals(method) || "PUT".equals(method) || "PATCH".equals(method)
+            || "DELETE".equals(method);
+    }
+
+    private boolean isMultipart(HttpServletRequest request) {
+        String contentType = request.getContentType();
+        return contentType != null && contentType.toLowerCase(Locale.ROOT).startsWith("multipart/");
+    }
+
+    private boolean isJson(HttpServletRequest request) {
+        String contentType = request.getContentType();
+        return contentType != null &&
+            contentType.toLowerCase(Locale.ROOT).startsWith("application/json");
+    }
+
+    private void writeProblem(HttpServletResponse response, int status, String code, String detail) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/problem+json;charset=UTF-8");
+        response.getWriter().write("{\"type\":\"about:blank\",\"title\":\"" + code + "\",\"status\":" + status
+            + ",\"detail\":\"" + detail + "\",\"code\":\"" + code + "\",\"fieldErrors\":{}}");
     }
 
     private String extractEmail(byte[] body) {
-        Matcher matcher = EMAIL_FIELD.matcher(new String(body, StandardCharsets.UTF_8));
-        if (!matcher.find()) return "";
-        return decodeJsonString(matcher.group(1)).trim().toLowerCase(java.util.Locale.ROOT);
-    }
-
-    private String decodeJsonString(String value) {
-        StringBuilder decoded = new StringBuilder(value.length());
-        for (int index = 0; index < value.length(); index++) {
-            char character = value.charAt(index);
-            if (character != '\\' || index + 1 >= value.length()) {
-                decoded.append(character);
-                continue;
-            }
-            char escape = value.charAt(++index);
-            switch (escape) {
-                case '"', '\\', '/' -> decoded.append(escape);
-                case 'b' -> decoded.append('\b');
-                case 'f' -> decoded.append('\f');
-                case 'n' -> decoded.append('\n');
-                case 'r' -> decoded.append('\r');
-                case 't' -> decoded.append('\t');
-                case 'u' -> {
-                    if (index + 4 >= value.length()) return "";
-                    try {
-                        decoded.append((char) Integer.parseInt(value.substring(index + 1, index + 5), 16));
-                        index += 4;
-                    } catch (NumberFormatException exception) {
-                        return "";
-                    }
-                }
-                default -> { return ""; }
-            }
+        try {
+            JsonNode parsed = LOGIN_MAPPER.readTree(body);
+            JsonNode email = parsed == null ? null : parsed.get("email");
+            return email != null && email.isTextual() ? email.asText().trim().toLowerCase(Locale.ROOT) : "";
+        } catch (IOException exception) {
+            return "";
         }
-        return decoded.toString();
     }
 
     private String digest(String value) {
@@ -141,8 +176,8 @@ public class RateLimitFilter extends OncePerRequestFilter {
         private long lastRefillNanos = System.nanoTime();
         private long lastTouchedNanos = lastRefillNanos;
 
-        private TokenBucket(int capacity, Duration window) {
-            this.tokens = capacity;
+        private TokenBucket(int capacity) {
+            tokens = capacity;
         }
 
         private synchronized long tryConsume(int capacity, Duration window) {
@@ -167,15 +202,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private static final class CachedBodyRequest extends HttpServletRequestWrapper {
         private final byte[] body;
 
-        private CachedBodyRequest(HttpServletRequest request) throws IOException {
+        private CachedBodyRequest(HttpServletRequest request, long limit) throws IOException {
             super(request);
-            long contentLength = request.getContentLengthLong();
-            if (contentLength > LOGIN_BODY_LIMIT) throw new PayloadTooLargeException();
-            body = request.getInputStream().readNBytes(LOGIN_BODY_LIMIT + 1);
-            if (body.length > LOGIN_BODY_LIMIT) throw new PayloadTooLargeException();
+            if (request.getContentLengthLong() > limit) throw new PayloadTooLargeException();
+            body = request.getInputStream().readNBytes((int) limit + 1);
+            if (body.length > limit) throw new PayloadTooLargeException();
         }
 
-        private byte[] body() { return body; }
+        private byte[] body() {
+            return body;
+        }
 
         @Override
         public ServletInputStream getInputStream() {

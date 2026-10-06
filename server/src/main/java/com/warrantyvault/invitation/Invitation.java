@@ -51,4 +51,7 @@ public class Invitation {
 
     @Column(name = "responded_at")
     private Instant respondedAt;
+
+    @Column(name = "token_hash", length = 64)
+    private String tokenHash;
 }

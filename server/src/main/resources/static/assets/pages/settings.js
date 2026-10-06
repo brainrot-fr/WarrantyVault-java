@@ -3,18 +3,21 @@ import {
   element,
   addField,
   addSelect,
+  addPasswordToggle,
   showMessage,
-  appendFieldErrors,
+  showFieldErrors,
   errorBox
 } from '../ui.js';
 
 export async function renderSettings(runtime) {
-  const main = element('main', {className: 'page-content'});
+  runtime.setPageTitle('Settings');
+  const main = element('main', {className: 'page-content', 'aria-busy': 'true'});
   main.append(element('p', {role: 'status'}, 'Loading account settings…'));
   runtime.renderShell(main, true);
   try {
     const user = await apiJson('/api/me');
     runtime.setSession(user);
+    main.removeAttribute('aria-busy');
     main.replaceChildren();
     const heading = element('div', {className: 'page-heading'});
     heading.append(
@@ -28,19 +31,31 @@ export async function renderSettings(runtime) {
         [element('span', {}, 'Email'), element('strong', {}, user.email)]));
     const name = addField(
         profile, 'Name', 'name', 'text',
-        {required: '', minlength: '2', maxlength: '120'});
+        {
+          required: '',
+          minlength: '2',
+          maxlength: '120',
+          placeholder: 'Your name'
+        });
     name.value = user.name;
     const timezoneOptions = [...new Set([
-      user.timezone || 'UTC', 'UTC', 'America/Los_Angeles', 'America/New_York',
-      'Europe/London', 'Europe/Paris', 'Asia/Kolkata', 'Asia/Singapore',
-      'Asia/Tokyo', 'Australia/Sydney'
-    ])];
+      user.timezone || 'UTC', 'UTC',
+      ...(typeof Intl.supportedValuesOf === 'function' ?
+          Intl.supportedValuesOf('timeZone') : [
+            'America/Los_Angeles', 'America/New_York', 'Europe/London',
+            'Europe/Paris', 'Asia/Kolkata', 'Asia/Singapore', 'Asia/Tokyo',
+            'Australia/Sydney'
+          ])
+    ])].sort();
     const timezone = addSelect(
         profile, 'Timezone', 'timezone',
         timezoneOptions.map((zone) => [zone, zone]), user.timezone || 'UTC');
     const currencies = [...new Set([
-      user.currency || 'INR', 'INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'
-    ])];
+      user.currency || 'INR',
+      ...(typeof Intl.supportedValuesOf === 'function' ?
+          Intl.supportedValuesOf('currency') :
+          ['INR', 'USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'])
+    ])].sort();
     addSelect(
         profile, 'Currency', 'currency',
         currencies.map((currency) => [currency, currency]),
@@ -70,7 +85,7 @@ export async function renderSettings(runtime) {
         showMessage(profileFeedback, 'Account details saved.', 'status');
       } catch (error) {
         showMessage(profileFeedback, error.message);
-        appendFieldErrors(profileFeedback, profile, error.fieldErrors);
+        showFieldErrors(profile, error.fieldErrors, {name: 'Name', timezone: 'Time zone', currency: 'Currency'});
       } finally {
         submit.disabled = false;
       }
@@ -79,22 +94,30 @@ export async function renderSettings(runtime) {
 
     const password = element('form', {className: 'settings-form inline-form'});
     password.append(element('h2', {}, 'Change password'));
-    addField(
+    addPasswordToggle(addField(
         password, 'Current password', 'currentPassword', 'password',
-        {required: '', autocomplete: 'current-password'});
+        {
+          required: '',
+          autocomplete: 'current-password',
+          placeholder: 'Enter your current password'
+        }));
     const newPassword =
         addField(password, 'New password', 'newPassword', 'password', {
           required: '',
           minlength: '8',
           maxlength: '72',
-          autocomplete: 'new-password'
+          autocomplete: 'new-password',
+          placeholder: 'At least 8 characters',
+          hint: 'Use at least 8 characters, choose a unique passphrase, and avoid common passwords.'
         });
-    addField(password, 'Confirm new password', 'confirmPassword', 'password', {
+    addPasswordToggle(newPassword);
+    addPasswordToggle(addField(password, 'Confirm new password', 'confirmPassword', 'password', {
       required: '',
       minlength: '8',
       maxlength: '72',
-      autocomplete: 'new-password'
-    });
+      autocomplete: 'new-password',
+      placeholder: 'Re-enter your new password'
+    }));
     const passwordFeedback = element('div', {'aria-live': 'polite'});
     password.append(
         passwordFeedback,
@@ -131,13 +154,17 @@ export async function renderSettings(runtime) {
         showMessage(passwordFeedback, 'Password updated.', 'status');
       } catch (error) {
         showMessage(passwordFeedback, error.message);
-        appendFieldErrors(passwordFeedback, password, error.fieldErrors);
+        showFieldErrors(password, error.fieldErrors, {
+          currentPassword: 'Current password',
+          newPassword: 'New password'
+        });
       } finally {
         submit.disabled = false;
       }
     });
     main.append(password);
   } catch (error) {
+    main.removeAttribute('aria-busy');
     main.replaceChildren(errorBox(error, () => renderSettings(runtime)));
   }
 }

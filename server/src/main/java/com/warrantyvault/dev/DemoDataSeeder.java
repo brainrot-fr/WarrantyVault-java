@@ -1,6 +1,8 @@
 package com.warrantyvault.dev;
 
 import com.warrantyvault.common.UuidGenerator;
+import com.warrantyvault.config.AppProperties;
+import com.warrantyvault.auth.CommonPasswordPolicy;
 import com.warrantyvault.invitation.Invitation;
 import com.warrantyvault.invitation.InvitationRepository;
 import com.warrantyvault.member.SpaceMember;
@@ -30,6 +32,14 @@ import java.time.LocalDate;
 import java.time.ZoneId;
 import java.util.List;
 import java.util.UUID;
+import java.util.ArrayList;
+import java.nio.charset.StandardCharsets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import javax.imageio.ImageIO;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
@@ -39,6 +49,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 @Configuration
 public class DemoDataSeeder {
+    private static final Logger logger = LoggerFactory.getLogger(DemoDataSeeder.class);
     private final UserRepository userRepository;
     private final SpaceRepository spaceRepository;
     private final SpaceMemberRepository spaceMemberRepository;
@@ -47,11 +58,19 @@ public class DemoDataSeeder {
     private final StorageService storageService;
     private final PasswordEncoder passwordEncoder;
     private final Clock clock;
+    private final TransactionTemplate transactionTemplate;
+    private final AppProperties appProperties;
+    private final String serverAddress;
+    private final String demoPassword;
+    private final CommonPasswordPolicy commonPasswordPolicy;
 
     public DemoDataSeeder(UserRepository userRepository, SpaceRepository spaceRepository,
                           SpaceMemberRepository spaceMemberRepository, InvitationRepository invitationRepository,
                           ProductRepository productRepository, StorageService storageService,
-                          PasswordEncoder passwordEncoder, Clock clock) {
+                          PasswordEncoder passwordEncoder, Clock clock, PlatformTransactionManager transactionManager,
+                          AppProperties appProperties, @Value("${server.address:}") String serverAddress,
+                          @Value("${app.seed-demo-password:}") String demoPassword,
+                          CommonPasswordPolicy commonPasswordPolicy) {
         this.userRepository = userRepository;
         this.spaceRepository = spaceRepository;
         this.spaceMemberRepository = spaceMemberRepository;
@@ -60,16 +79,61 @@ public class DemoDataSeeder {
         this.storageService = storageService;
         this.passwordEncoder = passwordEncoder;
         this.clock = clock;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.appProperties = appProperties;
+        this.serverAddress = serverAddress;
+        this.demoPassword = demoPassword;
+        this.commonPasswordPolicy = commonPasswordPolicy;
     }
 
     @Bean
+    @ConditionalOnProperty(name = "app.seed-demo-data", havingValue = "true")
     ApplicationRunner seedLocalDemoData() {
         return args -> {
-            if (userRepository.count() == 0) seed();
+            if (!isLoopback(serverAddress)) {
+                throw new IllegalStateException("Demo data can only be enabled when server.address is a loopback address.");
+            }
+            if (!appProperties.isSeedDemoData()) return;
+            List<String> writtenFiles = new ArrayList<>();
+            try {
+                Boolean seeded = transactionTemplate.execute(status -> {
+                    if (userRepository.count() > 0) return false;
+                    validateDemoPassword();
+                    seed(writtenFiles);
+                    return true;
+                });
+                if (Boolean.TRUE.equals(seeded))
+                    logger.warn("Local demo accounts and data were created. Keep the configured demo password private.");
+            } catch (RuntimeException exception) {
+                for (String key : writtenFiles) {
+                    try {
+                        storageService.delete(key);
+                    } catch (RuntimeException cleanupFailure) {
+                        logger.warn("Could not remove failed demo seed file {}", key);
+                    }
+                }
+                throw exception;
+            }
         };
     }
 
-    private void seed() throws IOException {
+    private void validateDemoPassword() {
+        if (demoPassword == null
+            || demoPassword.getBytes(StandardCharsets.UTF_8).length < 8
+            || demoPassword.getBytes(StandardCharsets.UTF_8).length > 72
+            || commonPasswordPolicy.isCommon(demoPassword)
+            || demoPassword.equalsIgnoreCase("demo@warrantyvault.local")
+            || demoPassword.equalsIgnoreCase("family@warrantyvault.local")) {
+            throw new IllegalStateException(
+                "APP_DEMO_PASSWORD must be a unique, non-common password between 8 and 72 UTF-8 bytes.");
+        }
+    }
+
+    private boolean isLoopback(String address) {
+        return "127.0.0.1".equals(address) || "localhost".equalsIgnoreCase(address) || "::1".equals(address);
+    }
+
+    private void seed(List<String> writtenFiles) {
         Instant now = Instant.now(clock);
         User demo = createUser("demo@warrantyvault.local", "Demo Household", now);
         User family = createUser("family@warrantyvault.local", "Family Member", now);
@@ -79,11 +143,10 @@ public class DemoDataSeeder {
         addMember(farmhouse, demo, SpaceRole.OWNER, now);
         addMember(home, family, SpaceRole.VIEWER, now);
         createInvitation(home, demo, "family@warrantyvault.local", SpaceRole.VIEWER, now, "ACCEPTED");
-        createInvitation(farmhouse, demo, "family@warrantyvault.local", SpaceRole.EDITOR, now, "PENDING");
 
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(demo.getTimezone())));
-        seedSpaceProducts(home, demo, today, homeProducts(), now);
-        seedSpaceProducts(farmhouse, demo, today, farmhouseProducts(), now);
+        seedSpaceProducts(home, demo, today, homeProducts(), now, writtenFiles);
+        seedSpaceProducts(farmhouse, demo, today, farmhouseProducts(), now, writtenFiles);
     }
 
     static List<SeedProduct> homeProducts() {
@@ -109,7 +172,7 @@ public class DemoDataSeeder {
         user.setId(UuidGenerator.nextId());
         user.setEmail(email);
         user.setName(name);
-        user.setPasswordHash(passwordEncoder.encode("Password123!"));
+        user.setPasswordHash(passwordEncoder.encode(demoPassword));
         user.setTimezone("Asia/Kolkata");
         user.setCurrency("INR");
         user.setCreatedAt(now);
@@ -150,13 +213,19 @@ public class DemoDataSeeder {
         invitationRepository.save(invitation);
     }
 
-    private void seedSpaceProducts(Space space, User creator, LocalDate today, List<SeedProduct> seeds, Instant now) throws IOException {
+    private void seedSpaceProducts(Space space, User creator, LocalDate today, List<SeedProduct> seeds, Instant now,
+                                   List<String> writtenFiles) {
         for (SeedProduct seed : seeds) {
             LocalDate expiresOn = today.plusDays(seed.expiryOffsetDays());
             LocalDate purchasedOn = expiresOn.minusMonths(seed.warrantyMonths());
             LocalDate computedExpiry = purchasedOn.plusMonths(seed.warrantyMonths());
-            StorageService.StoredFile bill = storageService.store(
-                new SeedBill(seed.type(), seed.brand(), seed.price(), purchasedOn), space.getId());
+            StorageService.StoredFile bill;
+            try {
+                bill = storageService.store(new SeedBill(seed.type(), seed.brand(), seed.price(), purchasedOn), space.getId());
+            } catch (IOException exception) {
+                throw new IllegalStateException("Could not create demo bill", exception);
+            }
+            writtenFiles.add(bill.key());
             Product product = new Product();
             product.setId(UuidGenerator.nextId());
             product.setSpace(space);
@@ -187,25 +256,29 @@ public class DemoDataSeeder {
             label = type + " " + brand + " INR " + price;
             BufferedImage image = new BufferedImage(640, 800, BufferedImage.TYPE_INT_RGB);
             Graphics2D graphics = image.createGraphics();
-            graphics.setColor(new Color(248, 245, 237));
-            graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
-            graphics.setColor(new Color(44, 59, 50));
-            graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 28));
-            graphics.drawString("HOME APPLIANCES", 48, 68);
-            graphics.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 22));
-            graphics.setColor(new Color(91, 101, 96));
-            graphics.drawString("Store receipt", 48, 110);
-            graphics.drawString("Date: " + purchasedOn, 48, 152);
-            graphics.drawString("Model: " + brand + " " + type, 48, 194);
-            graphics.drawLine(48, 222, 592, 222);
-            graphics.setColor(new Color(44, 59, 50));
-            graphics.drawString("Item: " + label, 48, 266);
-            graphics.drawLine(48, 292, 592, 292);
-            graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 26));
-            graphics.drawString("TOTAL: INR " + price, 48, 342);
-            graphics.dispose();
+            try {
+                graphics.setColor(new Color(248, 245, 237));
+                graphics.fillRect(0, 0, image.getWidth(), image.getHeight());
+                graphics.setColor(new Color(44, 59, 50));
+                graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 28));
+                graphics.drawString("HOME APPLIANCES", 48, 68);
+                graphics.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 22));
+                graphics.setColor(new Color(91, 101, 96));
+                graphics.drawString("Store receipt", 48, 110);
+                graphics.drawString("Date: " + purchasedOn, 48, 152);
+                graphics.drawString("Model: " + brand + " " + type, 48, 194);
+                graphics.drawLine(48, 222, 592, 222);
+                graphics.setColor(new Color(44, 59, 50));
+                graphics.drawString("Item: " + label, 48, 266);
+                graphics.drawLine(48, 292, 592, 292);
+                graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 26));
+                graphics.drawString("TOTAL: INR " + price, 48, 342);
+            } finally {
+                graphics.dispose();
+            }
             ByteArrayOutputStream output = new ByteArrayOutputStream();
-            ImageIO.write(image, "png", output);
+            if (!ImageIO.write(image, "png", output))
+                throw new IOException("No PNG image writer is available");
             bytes = output.toByteArray();
         }
 

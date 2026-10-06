@@ -4,7 +4,7 @@
   --canvas-hover: #ebe5d9;
   --ink: #282b27;
   --ink-muted: #555b53;
-  --ink-faint: #73786f;
+  --ink-faint: #5f645b;
   --hairline: rgba(40, 43, 39, 0.17);
   --accent: #426451;
   --accent-hover: #355441;
@@ -17,8 +17,8 @@
   --radius-control: 8px;
   --radius-card: 14px;
   --content-width: 1120px;
-  --font-display: "Playfair Display", Georgia, serif;
-  --font-body: "DM Sans", "Avenir Next", sans-serif;
+  --font-display: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }
 
 * {
@@ -59,8 +59,23 @@ a {
   color: inherit;
 }
 :focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+#main-content.route-focus:focus {
+  outline: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 button,
 a,

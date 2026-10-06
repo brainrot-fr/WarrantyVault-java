@@ -1,6 +1,7 @@
 import {element, link} from '../ui.js';
 
 export function renderLanding(runtime) {
+  runtime.setPageTitle('WarrantyVault');
   const main = element('main', {className: 'page-content'});
   const section = element('section', {className: 'landing'});
   const copy = element('div');
