@@ -1,6 +1,5 @@
 package com.warrantyvault.space;
 
-import com.warrantyvault.common.ApiException;
 import com.warrantyvault.security.CurrentUser;
 import com.warrantyvault.user.User;
 import jakarta.validation.Valid;
@@ -22,26 +21,26 @@ public class SpaceController {
     @GetMapping("/spaces")
     public List<SpaceResponse> listSpaces() {
         User user = currentUser.get();
-        return spaceService.listSpaceResponses(user.getId());
+        return spaceService.listSpaceResponses(user);
     }
 
     @PostMapping("/spaces")
     public ResponseEntity<SpaceResponse> createSpace(@Valid @RequestBody CreateSpaceRequest request) {
         User user = currentUser.get();
         Space space = spaceService.createSpace(user.getId(), request.name(), request.description());
-        return ResponseEntity.status(HttpStatus.CREATED).body(spaceService.createdSpaceResponse(space, user.getId()));
+        return ResponseEntity.status(HttpStatus.CREATED).body(spaceService.createdSpaceResponse(space, user));
     }
 
     @GetMapping("/spaces/{spaceId}")
     public SpaceResponse getSpace(@PathVariable String spaceId) {
-        return spaceService.spaceResponse(spaceId, currentUser.get().getId());
+        return spaceService.spaceResponse(spaceId, currentUser.get());
     }
 
     @PatchMapping("/spaces/{spaceId}")
     public SpaceResponse updateSpace(@PathVariable String spaceId, @Valid @RequestBody UpdateSpaceRequest request) {
         User user = currentUser.get();
         Space space = spaceService.updateSpace(spaceId, user.getId(), request.name(), request.description());
-        return spaceService.createdSpaceResponse(space, user.getId());
+        return spaceService.createdSpaceResponse(space, user);
     }
 
     @DeleteMapping("/spaces/{spaceId}")

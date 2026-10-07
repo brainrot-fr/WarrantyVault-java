@@ -46,7 +46,7 @@ export async function renderDashboard(runtime) {
     const [dashboard, spaces] = await Promise.all([
       apiJson('/api/dashboard'), apiJson('/api/spaces')
     ]);
-    await runtime.refreshInvitations();
+    runtime.refreshInvitations();
     main.removeAttribute('aria-busy');
     primary.replaceChildren();
     const counts = dashboard.counts || {};

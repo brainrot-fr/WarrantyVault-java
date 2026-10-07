@@ -81,8 +81,8 @@ public class SpaceService {
     }
 
     @Transactional(readOnly = true)
-    public List<SpaceResponse> listSpaceResponses(String userId) {
-        User viewer = userRepository.findById(userId).orElseThrow(() -> new ApiException("NOT_FOUND", "User not found", 404));
+    public List<SpaceResponse> listSpaceResponses(User viewer) {
+        String userId = viewer.getId();
         List<SpaceMember> memberships = spaceMemberRepository.findByUserId(userId);
         if (memberships.isEmpty()) return List.of();
         List<String> spaceIds = memberships.stream().map(membership -> membership.getSpace().getId()).toList();
@@ -106,13 +106,15 @@ public class SpaceService {
     }
 
     @Transactional(readOnly = true)
-    public SpaceResponse spaceResponse(String spaceId, String userId) {
-        return toResponse(requireMembership(spaceId, userId).getSpace(), userId);
+    public SpaceResponse spaceResponse(String spaceId, User viewer) {
+        SpaceMember membership = requireMembership(spaceId, viewer.getId());
+        return toResponse(membership.getSpace(), viewer, membership.getRole());
     }
 
     @Transactional(readOnly = true)
-    public SpaceResponse createdSpaceResponse(Space space, String userId) {
-        return toResponse(space, userId);
+    public SpaceResponse createdSpaceResponse(Space space, User viewer) {
+        SpaceMember membership = requireMembership(space.getId(), viewer.getId());
+        return toResponse(space, viewer, membership.getRole());
     }
 
     @Transactional
@@ -170,10 +172,7 @@ public class SpaceService {
             .orElseThrow(() -> new ApiException("NOT_FOUND", "Space not found", 404));
     }
 
-    private SpaceResponse toResponse(Space space, String userId) {
-        User viewer = userRepository.findById(userId).orElseThrow(() -> new ApiException("NOT_FOUND", "User not found", 404));
-        SpaceRole role = spaceMemberRepository.findBySpaceAndUser(space, viewer)
-            .orElseThrow(() -> new ApiException("NOT_FOUND", "Space not found", 404)).getRole();
+    private SpaceResponse toResponse(Space space, User viewer, SpaceRole role) {
         LocalDate today = LocalDate.now(clock.withZone(ZoneId.of(viewer.getTimezone())));
         SpaceProductAggregate aggregate = productRepository.findSpaceProductAggregate(
             space.getId(), today, today.plusDays(appProperties.getExpiringSoonDays()));

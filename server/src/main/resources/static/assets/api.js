@@ -1,6 +1,5 @@
 let accessToken = null;
 let refreshPromise = null;
-const requestTimeoutMs = 30_000;
 
 export class ApiError extends Error {
   constructor(status, problem = {}) {
@@ -43,8 +42,7 @@ async function refreshAccessToken() {
                 'Content-Type': 'application/json',
                 'X-Requested-With': 'warrantyvault'
               },
-              body: '{}',
-              signal: AbortSignal.timeout(requestTimeoutMs)
+              body: '{}'
             });
           } catch (error) {
             throw new ApiError(0, {
@@ -72,7 +70,7 @@ export async function restoreSession() {
 }
 
 export async function apiRequest(path, options = {}) {
-  const {skipRefresh = false, timeoutMs = requestTimeoutMs, ...requestOptions} = options;
+  const {skipRefresh = false, timeoutMs, ...requestOptions} = options;
   const headers = new Headers(requestOptions.headers || {});
   const isForm = requestOptions.body instanceof FormData;
   if (requestOptions.body != null && !isForm && !headers.has('Content-Type')) {
@@ -86,7 +84,8 @@ export async function apiRequest(path, options = {}) {
       ...requestOptions,
       headers,
       credentials: 'include',
-      signal: requestOptions.signal || AbortSignal.timeout(timeoutMs)
+      signal: requestOptions.signal ||
+          (timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs))
     });
   } catch (error) {
     if (requestOptions.signal?.aborted) throw error;

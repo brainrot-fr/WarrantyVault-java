@@ -16,8 +16,8 @@ export async function renderSettings(runtime) {
   main.append(element('p', {role: 'status'}, 'Loading account settings…'));
   runtime.renderShell(main, true);
   try {
-    const user = await apiJson('/api/me');
-    runtime.setSession(user);
+    const user = runtime.session || await apiJson('/api/me');
+    if (!runtime.session) runtime.setSession(user);
     main.removeAttribute('aria-busy');
     main.replaceChildren();
     const heading = element('div', {className: 'page-heading'});
