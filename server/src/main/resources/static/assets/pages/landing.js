@@ -16,7 +16,7 @@ export function renderLanding(runtime) {
   const actions = element('div', {className: 'landing-actions'});
   actions.append(
       link('Create your vault', '/register', 'button button-primary'),
-      link('Sign in', '/login', 'text-button'));
+      link('Sign in', '/login', 'btn btn-quiet'));
   copy.append(actions);
   section.append(
       copy,

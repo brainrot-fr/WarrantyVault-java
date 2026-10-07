@@ -56,7 +56,7 @@ export async function renderInvitations(runtime) {
             'button', {
               type: 'button',
               className:
-                  `text-button ${action === 'accept' ? 'accept-link' : ''}`
+                  `btn btn-quiet ${action === 'accept' ? 'accept-link' : ''}`
             },
             action === 'accept' ? 'Accept' : 'Decline');
         button.addEventListener('click', async () => {
