@@ -103,9 +103,23 @@
     flex-wrap: wrap;
     padding-block: 0.9rem;
   }
+  .invitation-row {
+    grid-template-columns: 1fr;
+    row-gap: 0.7rem;
+  }
+  .invitation-row > span:first-child,
+  .invitation-row .role-explanation,
+  .invitation-row .field,
+  .invitation-row .member-actions {
+    grid-column: 1;
+    grid-row: auto;
+  }
   .member-actions {
     width: 100%;
     justify-content: flex-start;
+  }
+  .invitation-row .member-actions {
+    width: auto;
   }
   .page-controls {
     align-items: flex-start;
