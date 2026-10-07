@@ -1,0 +1,9 @@
+:root{--dur-fast:90ms;--dur-medium:240ms;--dur-slow:560ms;--ease-out:cubic-bezier(.22,1,.36,1);--ease-in-out:cubic-bezier(.65,0,.35,1);--ease-spring:cubic-bezier(.22,1.2,.36,1);--i:0}
+@keyframes page-in{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+@keyframes toast-in{from{opacity:0;transform:translateY(1rem) scale(.96)}to{opacity:1;transform:none}}
+@keyframes shimmer{to{background-position:-200% 0}}
+@keyframes pulse-dot{50%{transform:scale(1.35);opacity:.55}}
+@keyframes spin{to{transform:rotate(360deg)}}
+.stagger-item{animation:page-in var(--dur-slow) var(--ease-out) both;animation-delay:calc(var(--i)*50ms)}
+.motion-pulse{animation:pulse-dot 1.8s ease-in-out infinite}
+html.is-hidden .motion-pulse{animation-play-state:paused}

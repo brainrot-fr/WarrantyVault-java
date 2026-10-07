@@ -1,0 +1,8 @@
+export function prefersReducedMotion(){return window.matchMedia('(prefers-reduced-motion: reduce)').matches}
+export function countUp(node,value,{format=(n)=>String(n),duration=560}={}){if(prefersReducedMotion()){node.textContent=format(value);return}const start=performance.now();function tick(now){const progress=Math.min(1,(now-start)/duration);node.textContent=format(Math.round(value*(1-Math.pow(1-progress,3))));if(progress<1)requestAnimationFrame(tick)}requestAnimationFrame(tick)}
+export function stagger(nodes){nodes.forEach((node,index)=>node.style.setProperty('--i',index))}
+export function reveal(root=document){const observer=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting){entry.target.classList.add('is-revealed');observer.unobserve(entry.target)}}),{threshold:.12});root.querySelectorAll('.reveal').forEach(node=>observer.observe(node));return()=>observer.disconnect()}
+export function viewTransition(fn){if(document.startViewTransition&&!prefersReducedMotion())return document.startViewTransition(fn);return fn()}
+export function ripple(event){const target=event.currentTarget;if(prefersReducedMotion())return;const dot=document.createElement('span');dot.className='ripple';const rect=target.getBoundingClientRect();dot.style.left=`${event.clientX-rect.left}px`;dot.style.top=`${event.clientY-rect.top}px`;target.append(dot);dot.addEventListener('animationend',()=>dot.remove(),{once:true})}
+export function shake(node){node.classList.remove('shake');requestAnimationFrame(()=>node.classList.add('shake'))}
+document.addEventListener('visibilitychange',()=>document.documentElement.classList.toggle('is-hidden',document.hidden));
