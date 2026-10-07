@@ -12,6 +12,7 @@ import {renderSpaces} from './pages/spaces.js';
 import {renderShell} from './shell.js';
 import {el} from './core/dom.js';
 import {confirmDialog} from './components/index.js';
+document.addEventListener('keydown',event=>{if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();import('./components/command-palette.js').then(module=>module.openCommandPalette())}});
 const root=document.querySelector('#app');let session=null,state='loading',hasUnsaved=false,invitationCount=0,spaces=[];const imageUrls=new Set();
 const routes=[[/^\/$/,'landing',false],[/^\/login\/?$/,'login',false],[/^\/register\/?$/,'register',false],[/^\/dashboard\/?$/,'dashboard',true],[/^\/add-product\/?$/,'product-new-global',true],[/^\/spaces\/?$/,'spaces',true],[/^\/spaces\/([^/]+)\/?$/,'space',true],[/^\/spaces\/([^/]+)\/products\/new\/?$/,'product-new',true],[/^\/spaces\/([^/]+)\/products\/([^/]+)\/edit\/?$/,'product-edit',true],[/^\/spaces\/([^/]+)\/products\/([^/]+)\/?$/,'product',true],[/^\/spaces\/([^/]+)\/members\/?$/,'members',true],[/^\/invitations\/?$/,'invitations',true],[/^\/settings\/?$/,'settings',true]];
 function route(){for(const [pattern,page,protectedRoute] of routes){const match=location.pathname.match(pattern);if(match)return {page,params:match.slice(1),protected:protectedRoute}}return {page:'404',params:[],protected:false}}
